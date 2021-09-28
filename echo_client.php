@@ -2,6 +2,7 @@
 
 $destination = "tcp://localhost:11180";
 $socket = stream_socket_client($destination);
+
 if ($socket ===false) {
     print("ソケットの確立に失敗");
     exit();
