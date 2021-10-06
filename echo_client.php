@@ -20,6 +20,7 @@ if ($socket ===false) {
         // サーバー側からのレスポンスを取得
         while(true) {
             $read = fread($socket, 1024);
+            print(1);
             /*
             $info = stream_get_meta_data($socket);
             if ($info['timed_out']) {

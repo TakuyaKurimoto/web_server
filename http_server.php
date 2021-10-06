@@ -78,7 +78,7 @@ if ($socket === false) {
                                     Connection: Keep-Alive
                                     Content-Type: text/html\r\n";
                 
-                fwrite($clients[$key], $header ."\r\n" . $body, mb_strlen($header . $body));
+                fwrite($clients[$key], "$header\r\n$body\r\n\r\n", mb_strlen($header . $body));
                 print("送信完了");
                 
             }
