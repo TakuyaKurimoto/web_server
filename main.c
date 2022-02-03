@@ -25,27 +25,14 @@
 #define TRUE             1
 #define FALSE            0
 
-int read_line(int socket, char *p){
-    int len = 0;
-    while (1){
-        int ret;
-	ret = read(socket, p, 1);
-        if ( ret == -1 ){
-            perror("read");
-            exit(1);
-        } else if ( ret == 0 ){
-            break;
-        }
-	if ( *p == '\n' ){
-	    p++;
-	    len++;
-	    break;
-	}
-	p++;
-	len++;
+void _closeConnection(int descriptor, fd_set* master_set, int* max_sd){
+    close(descriptor);
+    FD_CLR(descriptor, master_set);
+    if (descriptor == *max_sd)
+    {
+       while (FD_ISSET(*max_sd, master_set) == FALSE)
+          *max_sd -= 1;
     }
-    *p = '\0';
-    return len;
 }
 
 
@@ -178,7 +165,7 @@ int main(int argc, char *argv[]){
             if (i == listening_socket)
             {
                printf("  Listening socket is readable\n");
-               printf("%d", new_sd);
+               
                /*************************************************/
                /* Accept all incoming connections that are      */
                /* queued up on the listening socket before we   */
@@ -253,13 +240,12 @@ int main(int argc, char *argv[]){
                      if (errno != EWOULDBLOCK)
                      {
                         perror("  recv() failed");
-                        close_conn = TRUE;
+                        //sclose_conn = TRUE;
                      }
                      else{
                          printf("リクエストを全部読み込んだ\n");
                      }
-
-                     
+                     _closeConnection(i, &master_set, &max_sd);
 
 
                   break;
@@ -271,8 +257,10 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   if (rc == 0)
                   {
-                     printf("  Connection closed\n");
-                     close_conn = TRUE;
+                     printf("  Connection closed %i\n", i);
+                     //close_conn = TRUE;
+
+                     _closeConnection(i, &master_set, &max_sd);
                      break;
                   }
 
@@ -331,9 +319,9 @@ int main(int argc, char *argv[]){
                   }
                   
                 }
-            } /* End of existing connection is readable */
-         } /* End of if (FD_ISSET(i, &working_set)) */
-      } /* End of loop through selectable descriptors */
+            } 
+         } 
+      } 
     }
     ret = close(listening_socket);
     if ( ret == -1 ){
@@ -344,12 +332,3 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
-void _closeConnection(int descriptor, fd_set* master_set, int* max_sd){
-    close(descriptor);
-    FD_CLR(descriptor, &master_set);
-    if (descriptor == max_sd)
-    {
-       while (FD_ISSET(max_sd, &master_set) == FALSE)
-          max_sd -= 1;
-    }
-}
