@@ -35,6 +35,62 @@ void _closeConnection(int descriptor, fd_set* master_set, int* max_sd){
     }
 }
 
+char* send_http_request(int descriptor) {
+  int port = 3000;
+  char *mes = "GET /user HTTP/1.1\n"
+              "Host: localhost:3000\n"
+              "Connection: keep-alive\n"
+              "\n";
+  char *ip = "127.0.0.1";
+  int len = strlen(mes);
+  int sock, on = 1;
+
+  if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+     perror("socketに失敗");
+
+  struct sockaddr_in addr;
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = inet_addr(ip);
+  addr.sin_port = htons(port);
+  
+  if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+     printf("connectに失敗 errno = %d\n", errno);
+   
+
+  if (send(sock, mes, len, 0) == -1)
+     perror("sendに失敗");
+  ;
+
+  printf("RECEIVE: \n");
+  int total = 0;
+  int num;
+  char buf[100000];
+
+  int rc = recv(sock, buf, sizeof(buf), 0);
+  printf("REIVE: \n");
+  if (rc < 0)
+  {
+     if (errno != EWOULDBLOCK)
+     {
+        perror("  recv() failed");
+        //sclose_conn = TRUE;
+     }
+     else
+     {
+        printf("リクエストを全部読み込んだ\n");
+     }
+   }
+   
+   printf("%s\n", buf);
+   printf("\n");
+   close(sock);
+
+   
+
+   rc = send(descriptor, buf, strlen(buf), 0);
+   return "send";
+}
+
 
 int main(int argc, char *argv[]){
     int connected_socket, listening_socket;
@@ -273,6 +329,7 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   /* Echo the data back to the client           */
                   /**********************************************/
+                  char* res = send_http_request(i);
                   char *reply = 
                     "HTTP/1.1 200 OK\n"
                     "Date: Thu, 19 Feb 2009 12:27:04 GMT\n"
@@ -284,11 +341,10 @@ int main(int argc, char *argv[]){
                     "Accept-Ranges: bytes\n"
                     "Connection: close\n"
                     "\n"
-                    "sdfkjsdnbfkjbsf";
+                    "res";
+                  
                   rc = send(i, reply, strlen(reply), 0);
-                  
 
-                  
                   if (rc < 0)
                   {
                      perror("  send() failed");
