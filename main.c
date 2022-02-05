@@ -1,25 +1,6 @@
-/*
- * $Id: echo-server-1.c,v 1.6 2005/02/19 16:01:53 68user Exp $
- *
- * echo サ〖バサンプル
- *
- * written by 68user  http://X68000.q-e-d.net/~68user/
- */
 //参考　https://www.ibm.com/docs/ja/i/7.2?topic=designs-example-nonblocking-io-select
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/uio.h>
-#include <unistd.h>
-#include <sys/param.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <errno.h>
-#include <sys/ioctl.h>
+#include "util.h"
 
 #define BUF_LEN 256             /* バッファのサイズ */
 #define TRUE             1
@@ -329,7 +310,7 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   len = rc;
                   printf("  %d bytes received\n", len);
-                  
+                  http_parse();
                   /**********************************************/
                   /* Echo the data back to the client           */
                   /**********************************************/

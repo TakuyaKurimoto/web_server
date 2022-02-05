@@ -1,3 +1,7 @@
+SRCS=$(wildcard *.c)
+OBJS=$(SRCS:.c=.o)
 
-up:
-	gcc main.c -o main; ./main;
+up:$(OBJS)
+	gcc -o main $(OBJS); ./main;
+$(OBJS):util.h
+.PHONY: up
