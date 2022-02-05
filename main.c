@@ -35,7 +35,7 @@ void _closeConnection(int descriptor, fd_set* master_set, int* max_sd){
     }
 }
 
-char* send_http_request(int descriptor) {
+void send_http_request(int descriptor) {
   int port = 3000;
   char *mes = "GET /user HTTP/1.1\n"
               "Host: localhost:3000\n"
@@ -44,7 +44,7 @@ char* send_http_request(int descriptor) {
   char *ip = "127.0.0.1";
   int len = strlen(mes);
   int sock, on = 1;
-
+  
   if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
      perror("socketに失敗");
 
@@ -67,7 +67,7 @@ char* send_http_request(int descriptor) {
   char buf[100000];
 
   int rc = recv(sock, buf, sizeof(buf), 0);
-  printf("REIVE: \n");
+
   if (rc < 0)
   {
      if (errno != EWOULDBLOCK)
@@ -81,14 +81,17 @@ char* send_http_request(int descriptor) {
      }
    }
    
-   printf("%s\n", buf);
    printf("\n");
    close(sock);
 
    
 
    rc = send(descriptor, buf, strlen(buf), 0);
-   return "send";
+   if (rc < 0)
+      {
+         perror("  send() failed");
+      }
+   return;
 }
 
 
@@ -280,6 +283,7 @@ int main(int argc, char *argv[]){
                /* Receive all incoming data on this socket      */
                /* before we loop back and call select again.    */
                /*************************************************/
+               
                do
                {
                   /**********************************************/
@@ -329,52 +333,10 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   /* Echo the data back to the client           */
                   /**********************************************/
-                  char* res = send_http_request(i);
-                  char *reply = 
-                    "HTTP/1.1 200 OK\n"
-                    "Date: Thu, 19 Feb 2009 12:27:04 GMT\n"
-                    "Server: Apache/2.2.3\n"
-                    "Last-Modified: Wed, 18 Jun 2003 16:05:58 GMT\n"
-                    "ETag: \"56d-9989200-1132c580\"\n"
-                    "Content-Type: text/html\n"
-                    "Content-Length: 15\n"
-                    "Accept-Ranges: bytes\n"
-                    "Connection: close\n"
-                    "\n"
-                    "res";
-                  
-                  rc = send(i, reply, strlen(reply), 0);
+                  send_http_request(i);
 
-                  if (rc < 0)
-                  {
-                     perror("  send() failed");
-                     close_conn = TRUE;
-                     break;
-                  }
-                  
                } while (TRUE);
-
-               /*************************************************/
-               /* If the close_conn flag was turned on, we need */
-               /* to clean up this active connection.  This     */
-               /* clean up process includes removing the        */
-               /* descriptor from the master set and            */
-               /* determining the new maximum descriptor value  */
-               /* based on the bits that are still turned on in */
-               /* the master set.                               */
-               /*************************************************/
                
-               if (close_conn)
-               {
-                  close(i);
-                  FD_CLR(i, &master_set);
-                  if (i == max_sd)
-                  {
-                     while (FD_ISSET(max_sd, &master_set) == FALSE)
-                        max_sd -= 1;
-                  }
-                  
-                }
             } 
          } 
       } 
