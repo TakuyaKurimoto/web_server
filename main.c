@@ -16,14 +16,18 @@ void _closeConnection(int descriptor, fd_set* master_set, int* max_sd){
     }
 }
 
-void send_http_request(int descriptor) {
+void send_http_request(int descriptor, Request* request) {
   int port = 3000;
-  char *mes = "GET /user HTTP/1.1\n"
-              "Host: localhost:3000\n"
-              "Connection: keep-alive\n"
-              "\n";
+  
+
+  char request_header[1000];
+  snprintf(request_header, 1000, "GET %s HTTP/1.1\n"
+                                 "Host: localhost:3000\n"
+                                 "Connection: keep-alive\n"
+                                 "\n", request->url_path);
+
   char *ip = "127.0.0.1";
-  int len = strlen(mes);
+  int len = strlen(request_header);
   int sock, on = 1;
   
   if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
@@ -38,14 +42,14 @@ void send_http_request(int descriptor) {
      printf("connectに失敗 errno = %d\n", errno);
    
 
-  if (send(sock, mes, len, 0) == -1)
+  if (send(sock, request_header, len, 0) == -1)
      perror("sendに失敗");
   ;
 
   printf("RECEIVE: \n");
   int total = 0;
   int num;
-  char buf[100000];
+  char buf[500000];
 
   int rc = recv(sock, buf, sizeof(buf), 0);
 
@@ -61,8 +65,8 @@ void send_http_request(int descriptor) {
         printf("リクエストを全部読み込んだ\n");
      }
    }
-   
-   printf("\n");
+   printf("size =    %d\n", rc);
+   printf("%s\n", buf);
    close(sock);
 
    
@@ -87,9 +91,9 @@ int main(int argc, char *argv[]){
     struct timeval timeout;
     int    close_conn;
     char   buffer[2048];
+    Request* request;
 
-
-	//socket 作成　返り値はファイルディスクリプタ
+    //socket 作成　返り値はファイルディスクリプタ
     listening_socket = socket(AF_INET, SOCK_STREAM, 0);
     if ( listening_socket == -1 ){
         perror("socket");
@@ -284,7 +288,7 @@ int main(int argc, char *argv[]){
                         //sclose_conn = TRUE;
                      }
                      else{
-                         printf("リクエストを全部読み込んだ\n");
+                         printf("リクエストを全部読み込みました\n");
                      }
                      _closeConnection(i, &master_set, &max_sd);
 
@@ -310,14 +314,17 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   len = rc;
                   printf("  %d bytes received\n", len);
-                  http_parse();
+
+                  //メモリを解放するのを忘れないこと。
+                  request = (Request*)calloc(sizeof(Request),1);
+
+                  http_parse(buffer, request);
                   /**********************************************/
                   /* Echo the data back to the client           */
                   /**********************************************/
-                  send_http_request(i);
-
+                  send_http_request(i, request);
+                  free(request);
                } while (TRUE);
-               
             } 
          } 
       } 

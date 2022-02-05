@@ -13,3 +13,7 @@
 #include <sys/ioctl.h>
 
 void http_parse();
+
+typedef struct  {          
+   char url_path[30];        
+} Request;
