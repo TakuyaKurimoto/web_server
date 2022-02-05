@@ -8,7 +8,8 @@
 
 fd_set master_set;
 int max_sd;
-Descriptor *descriptor_array[5000];
+//サーバとのソケットは1以上(そのサーバとのソケットを転送すべきクライアントとのソケット番号)、クライアントとのソケットは0
+int descriptor_array[5000];
 
 void _closeConnection(int descriptor){
     close(descriptor);
@@ -25,26 +26,12 @@ void send_http_request(int descriptor, Request* request) {
   
 
   char request_header[1000];
+
+  //HTTP 1.0 にしないとabコマンドはうまくいかない
   snprintf(request_header, 
       1000, "GET %s HTTP/1.1\n"
       "Host: localhost:3000\n"
-      "Connection: keep-alive\n"
-      "Connection: keep-alive\n"
-      "Cache-Control: max-age=0\n"
-      "sec-ch-ua: ' Not;A Brand';v='99', 'Google Chrome';v='97', 'Chromium';v='97'\n"
-      "sec-ch-ua-mobile: ?0\n"
-      "sec-ch-ua-platform: 'macOS'\n"
-      "Upgrade-Insecure-Requests: 1\n"
-      "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36\n"
-      "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9\n"
-      "Sec-Fetch-Site: none\n"
-      "Sec-Fetch-Mode: navigate\n"
-      "Sec-Fetch-User: ?1\n"
-      "Sec-Fetch-Dest: document\n"
-      "Accept-Encoding: gzip, deflate, br\n"
-      "Accept-Language: ja,en-US;q=0.9,en;q=0.8\n"
-      "Cookie: _ga=GA1.1.910668344.1636532212; \n"
-      "If-None-Match: W/'e6-dDWBSrgCLZdftT+LVe2p582pVks'\n\n"
+      "Accept: */*\n\n"
       ,request->url_path
    );
 
@@ -59,55 +46,30 @@ void send_http_request(int descriptor, Request* request) {
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = inet_addr(ip);
   addr.sin_port = htons(port);
+
+   
   
   if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
      printf("connectに失敗 errno = %d\n", errno);
+
+   if (ioctl(sock, FIONBIO, (char *)&on) < 0)
+    {
+       perror("ioctl() failed");
+       close(sock);
+       exit(-1);
+    }
    
+  descriptor_array[sock] = descriptor;
 
   if (send(sock, request_header, len, 0) == -1)
      perror("sendに失敗");
-  ;
 
+  FD_SET(sock, &master_set);
+                 
+   if (sock > max_sd)
+      max_sd = sock;
   
-  int total = 0;
-  int num;
-  char buf[100000];
-  int size = 0;
-
-  while(1){
-      memset(buf, 0, sizeof(buf));
-
-      int rc = recv(sock, buf, sizeof(buf), 0);
-      printf("RECEIVE: \n");
-
-      if (rc < 0){
-         if (errno != EWOULDBLOCK){
-            perror("  recv() failed");
-            //sclose_conn = TRUE;
-         }
-         else{
-            printf("読み込めるデータがない\n");
-         }
-         break;
-      }
-      else if (rc == 0){
-         printf("  Connection closed\n");
-         close(sock);
-         //リクエストを全部送ったことを知らせる。
-         _closeConnection(descriptor);
-         break;
-      }
-      //printf("%s\n", buf);
-      rc = send(descriptor, buf, strlen(buf), 0);
-      
-      printf("SEND!!\n");
-      if (rc < 0){
-         perror("  send() failed");
-      }
-      size += rc;
-  }
-  
-  }
+}
 
 int main(int argc, char *argv[]){
     int connected_socket, listening_socket;
@@ -273,6 +235,8 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   printf("  New incoming connection - %d\n", new_sd);
                   FD_SET(new_sd, &master_set);
+
+                  descriptor_array[new_sd] = 0;
                   if (new_sd > max_sd)
                      max_sd = new_sd;
 
@@ -284,10 +248,47 @@ int main(int argc, char *argv[]){
                
             }
             
-            /****************************************************/
-            /* This is not the listening socket, therefore an   */
-            /* existing connection must be readable             */
-            /****************************************************/
+            //サーバからデータが送られてきた場合
+            else if(descriptor_array[i]){
+               int total = 0;
+               int num;
+               char buf[100000];
+               int size = 0;
+
+               while(1){
+                   memset(buf, 0, sizeof(buf));
+
+                   int rc = recv(i, buf, sizeof(buf), 0);
+                   printf("RECEIVE %d バイト \n",rc);
+
+                   if (rc < 0){
+                      if (errno != EWOULDBLOCK){
+                         perror("  recv() failed");
+                         //sclose_conn = TRUE;
+                      }
+                      else{
+                         printf("読み込めるデータがない\n");
+                      }
+                      break;
+                   }
+                   else if (rc == 0){
+                      printf("  Connection closed\n");
+                      _closeConnection(i);
+                      //リクエストを全部送ったことを知らせる。
+                      _closeConnection(descriptor_array[i]);
+                      break;
+                   }
+                   //printf("%s\n", buf);
+                   rc = send(descriptor_array[i], buf, strlen(buf), 0);
+                   printf("クライアントにサーバからのデータを転送した!");
+
+
+                   if (rc < 0){
+                      perror("  send() failed");
+                   }
+                   size += rc;
+               }
+            }
             else
             {
                printf("  Descriptor %d is readable\n", i);
