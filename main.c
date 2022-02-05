@@ -6,13 +6,17 @@
 #define TRUE             1
 #define FALSE            0
 
-void _closeConnection(int descriptor, fd_set* master_set, int* max_sd){
+fd_set master_set;
+int max_sd;
+Descriptor *descriptor_array[5000];
+
+void _closeConnection(int descriptor){
     close(descriptor);
-    FD_CLR(descriptor, master_set);
-    if (descriptor == *max_sd)
+    FD_CLR(descriptor, &master_set);
+    if (descriptor == max_sd)
     {
-       while (FD_ISSET(*max_sd, master_set) == FALSE)
-          *max_sd -= 1;
+       while (FD_ISSET(max_sd, &master_set) == FALSE)
+         max_sd -= 1;
     }
 }
 
@@ -21,10 +25,28 @@ void send_http_request(int descriptor, Request* request) {
   
 
   char request_header[1000];
-  snprintf(request_header, 1000, "GET %s HTTP/1.1\n"
-                                 "Host: localhost:3000\n"
-                                 "Connection: keep-alive\n"
-                                 "\n", request->url_path);
+  snprintf(request_header, 
+      1000, "GET %s HTTP/1.1\n"
+      "Host: localhost:3000\n"
+      "Connection: keep-alive\n"
+      "Connection: keep-alive\n"
+      "Cache-Control: max-age=0\n"
+      "sec-ch-ua: ' Not;A Brand';v='99', 'Google Chrome';v='97', 'Chromium';v='97'\n"
+      "sec-ch-ua-mobile: ?0\n"
+      "sec-ch-ua-platform: 'macOS'\n"
+      "Upgrade-Insecure-Requests: 1\n"
+      "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36\n"
+      "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9\n"
+      "Sec-Fetch-Site: none\n"
+      "Sec-Fetch-Mode: navigate\n"
+      "Sec-Fetch-User: ?1\n"
+      "Sec-Fetch-Dest: document\n"
+      "Accept-Encoding: gzip, deflate, br\n"
+      "Accept-Language: ja,en-US;q=0.9,en;q=0.8\n"
+      "Cookie: _ga=GA1.1.910668344.1636532212; \n"
+      "If-None-Match: W/'e6-dDWBSrgCLZdftT+LVe2p582pVks'\n\n"
+      ,request->url_path
+   );
 
   char *ip = "127.0.0.1";
   int len = strlen(request_header);
@@ -46,39 +68,46 @@ void send_http_request(int descriptor, Request* request) {
      perror("sendに失敗");
   ;
 
-  printf("RECEIVE: \n");
+  
   int total = 0;
   int num;
-  char buf[500000];
+  char buf[100000];
+  int size = 0;
 
-  int rc = recv(sock, buf, sizeof(buf), 0);
+  while(1){
+      memset(buf, 0, sizeof(buf));
 
-  if (rc < 0)
-  {
-     if (errno != EWOULDBLOCK)
-     {
-        perror("  recv() failed");
-        //sclose_conn = TRUE;
-     }
-     else
-     {
-        printf("リクエストを全部読み込んだ\n");
-     }
-   }
-   printf("size =    %d\n", rc);
-   printf("%s\n", buf);
-   close(sock);
+      int rc = recv(sock, buf, sizeof(buf), 0);
+      printf("RECEIVE: \n");
 
-   
-
-   rc = send(descriptor, buf, strlen(buf), 0);
-   if (rc < 0)
-      {
+      if (rc < 0){
+         if (errno != EWOULDBLOCK){
+            perror("  recv() failed");
+            //sclose_conn = TRUE;
+         }
+         else{
+            printf("読み込めるデータがない\n");
+         }
+         break;
+      }
+      else if (rc == 0){
+         printf("  Connection closed\n");
+         close(sock);
+         //リクエストを全部送ったことを知らせる。
+         _closeConnection(descriptor);
+         break;
+      }
+      //printf("%s\n", buf);
+      rc = send(descriptor, buf, strlen(buf), 0);
+      
+      printf("SEND!!\n");
+      if (rc < 0){
          perror("  send() failed");
       }
-   return;
-}
-
+      size += rc;
+  }
+  
+  }
 
 int main(int argc, char *argv[]){
     int connected_socket, listening_socket;
@@ -86,8 +115,8 @@ int main(int argc, char *argv[]){
     int len, ret;
     int on = 1;
     int port = 8000;
-    int max_sd, new_sd;
-    fd_set master_set, working_set;
+    int new_sd;
+    fd_set working_set;
     struct timeval timeout;
     int    close_conn;
     char   buffer[2048];
@@ -263,7 +292,6 @@ int main(int argc, char *argv[]){
             {
                printf("  Descriptor %d is readable\n", i);
                
-               close_conn = FALSE;
                /*************************************************/
                /* Receive all incoming data on this socket      */
                /* before we loop back and call select again.    */
@@ -285,14 +313,12 @@ int main(int argc, char *argv[]){
                      if (errno != EWOULDBLOCK)
                      {
                         perror("  recv() failed");
-                        //sclose_conn = TRUE;
                      }
                      else{
-                         printf("リクエストを全部読み込みました\n");
+                         printf("読み込めるデータがありません\n");
+                         //_closeConnection(i);
                      }
-                     _closeConnection(i, &master_set, &max_sd);
-
-
+                     
                   break;
                   }
 
@@ -302,10 +328,9 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   if (rc == 0)
                   {
-                     printf("  Connection closed %i\n", i);
-                     //close_conn = TRUE;
+                     printf("  Connection closedされました %i\n", i);
 
-                     _closeConnection(i, &master_set, &max_sd);
+                     _closeConnection(i);
                      break;
                   }
 
@@ -313,17 +338,20 @@ int main(int argc, char *argv[]){
                   /* Data was received                          */
                   /**********************************************/
                   len = rc;
+                  
                   printf("  %d bytes received\n", len);
-
+                  
+                  
                   //メモリを解放するのを忘れないこと。
+                  //todo リクエストが分割して送られて来た時の対応
                   request = (Request*)calloc(sizeof(Request),1);
 
                   http_parse(buffer, request);
-                  /**********************************************/
-                  /* Echo the data back to the client           */
-                  /**********************************************/
+                  
                   send_http_request(i, request);
                   free(request);
+                  //send_http_requestで既にconnection close してる
+                  break;
                } while (TRUE);
             } 
          } 

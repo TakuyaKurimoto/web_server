@@ -4,6 +4,7 @@
         "cerrno": "cpp",
         "locale": "cpp",
         "util.h": "c",
-        "ioctl.h": "c"
+        "ioctl.h": "c",
+        "system_error": "c"
     }
 }
