@@ -11,6 +11,8 @@ int max_sd;
 //サーバとのソケットは1以上(そのサーバとのソケットを転送すべきクライアントとのソケット番号)、クライアントとのソケットは0
 int descriptor_array[5000];
 static unsigned int ip_addr;
+static int port = 3000;
+static char *hostname = "app";
 
 void _closeConnection(int descriptor){
     close(descriptor);
@@ -22,8 +24,11 @@ void _closeConnection(int descriptor){
     }
 }
 
+/**
+ * 接続先のipアドレスを解決する
+ * 
+ */
 void _setup(){
-    char *hostname = "app";
     struct addrinfo hints, *res;
     struct in_addr addrs;
 
@@ -41,22 +46,8 @@ void _setup(){
     ip_addr = addrs.s_addr;
 }
 
-void send_http_request(int descriptor, Request* request) {
-  int port = 3000;
-  
+void send_http_request(int descriptor, char* buffer) {
 
-  char request_header[1000];
-
-  //HTTP 1.0 にしないとabコマンドはうまくいかない
-  snprintf(request_header, 
-      1000, "GET %s HTTP/1.1\n"
-      "Host: localhost:3000\n"
-      "Accept: */*\n\n"
-      ,request->url_path
-   );
-
-
-  int len = strlen(request_header);
   int sock, on = 1;
   
   if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
@@ -78,16 +69,16 @@ void send_http_request(int descriptor, Request* request) {
        close(sock);
        exit(-1);
     }
-   
-  descriptor_array[sock] = descriptor;
+    printf("%s\n", buffer);
+    descriptor_array[sock] = descriptor;
 
-  if (send(sock, request_header, len, 0) == -1)
-     perror("sendに失敗");
+    if (send(sock, buffer, strlen(buffer), 0) == -1)
+       perror("sendに失敗");
 
-  FD_SET(sock, &master_set);
-                 
-   if (sock > max_sd)
-      max_sd = sock;
+    FD_SET(sock, &master_set);
+
+    if (sock > max_sd)
+       max_sd = sock;
   
 }
 
@@ -367,7 +358,7 @@ int main(int argc, char *argv[]){
 
                   http_parse(buffer, request);
                   
-                  send_http_request(i, request);
+                  send_http_request(i, buffer);
                   free(request);
                   //send_http_requestで既にconnection close してる
                   break;
