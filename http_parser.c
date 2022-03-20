@@ -36,7 +36,7 @@ void http_parse(char* str, Request* request){
             break;
         }
     }
-    printf("url_path = %s\n", request->url_path);
+    //printf("url_path = %s\n", request->url_path);
     return;
 }
 

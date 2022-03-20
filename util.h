@@ -18,6 +18,7 @@ typedef struct  {
    char url_path[30];        
 } Request;
 
-typedef struct  {          
-   int is_from_server;        
-} Descriptor;
+struct Descriptor {          
+   int is_from_server;
+   int num;
+};
