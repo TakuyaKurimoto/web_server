@@ -1,0 +1,32 @@
+version: '3'
+services:
+  nginx:
+    build:
+      context: ./docker/nginx      # Dockerfile保存場所
+      dockerfile: Dockerfile    # Dockerfileファイル名
+    container_name: nginx       # docker container name
+    ports:
+      - 8080:80
+    depends_on: 
+     - app 
+  takuya:
+    build:
+      context: ./docker/takuya      # Dockerfile保存場所
+      dockerfile: Dockerfile    # Dockerfileファイル名
+    container_name: takuya       # docker container name
+    ports:
+      - 8000:80
+    tty: true
+    volumes:
+      - ./:/usr/src/app
+    links:
+      - app:app
+  app:
+    build:
+      context: ./docker/app      # Dockerfile保存場所
+      dockerfile: Dockerfile    # Dockerfileファイル名
+    container_name: app       # docker container name
+    volumes:
+      - ./:/usr/src/app
+    ports:
+      - 3000:3000

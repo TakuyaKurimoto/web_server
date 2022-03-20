@@ -10,6 +10,7 @@ fd_set master_set;
 int max_sd;
 //サーバとのソケットは1以上(そのサーバとのソケットを転送すべきクライアントとのソケット番号)、クライアントとのソケットは0
 int descriptor_array[5000];
+static unsigned int ip_addr;
 
 void _closeConnection(int descriptor){
     close(descriptor);
@@ -19,6 +20,25 @@ void _closeConnection(int descriptor){
        while (FD_ISSET(max_sd, &master_set) == FALSE)
          max_sd -= 1;
     }
+}
+
+void _setup(){
+    char *hostname = "app";
+    struct addrinfo hints, *res;
+    struct in_addr addrs;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_family = AF_INET;
+
+    if ((getaddrinfo(hostname, NULL, &hints, &res)) != 0) {
+        printf("getaddrinf failed\n");
+        exit(1);
+    }
+    addrs.s_addr= ((struct sockaddr_in *)(res->ai_addr))->sin_addr.s_addr;
+
+    printf("ip addres resolve = : %s\n", inet_ntoa(addrs));
+    ip_addr = addrs.s_addr;
 }
 
 void send_http_request(int descriptor, Request* request) {
@@ -35,7 +55,7 @@ void send_http_request(int descriptor, Request* request) {
       ,request->url_path
    );
 
-  char *ip = "127.0.0.1";
+
   int len = strlen(request_header);
   int sock, on = 1;
   
@@ -44,7 +64,7 @@ void send_http_request(int descriptor, Request* request) {
 
   struct sockaddr_in addr;
   addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = inet_addr(ip);
+  addr.sin_addr.s_addr = ip_addr;
   addr.sin_port = htons(port);
 
    
@@ -72,23 +92,24 @@ void send_http_request(int descriptor, Request* request) {
 }
 
 int main(int argc, char *argv[]){
-    int connected_socket, listening_socket;
-    struct sockaddr_in sin;
-    int len, ret;
-    int on = 1;
-    int port = 8000;
-    int new_sd;
-    fd_set working_set;
-    struct timeval timeout;
-    int    close_conn;
-    char   buffer[2048];
-    Request* request;
+   _setup();
+   int listening_socket;
+   struct sockaddr_in sin;
+   int len, ret;
+   int on = 1;
+   int port = 80;
+   int new_sd;
+   fd_set working_set;
+   struct timeval timeout;
+   char buffer[2048];
+   Request *request;
 
-    //socket 作成　返り値はファイルディスクリプタ
-    listening_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if ( listening_socket == -1 ){
-        perror("socket");
-        exit(1);
+   // socket 作成　返り値はファイルディスクリプタ
+   listening_socket = socket(AF_INET, SOCK_STREAM, 0);
+   if (listening_socket == -1)
+   {
+      perror("socket");
+      exit(1);
     }
 	//ソケットオプションの設定。https://man.plustar.jp/php/function.socket-set-option.html　
     //第４引数はオプションの値.SO_REUSEADDRはboolの整数値（0か1）をとる
@@ -250,8 +271,6 @@ int main(int argc, char *argv[]){
             
             //サーバからデータが送られてきた場合
             else if(descriptor_array[i]){
-               int total = 0;
-               int num;
                char buf[100000];
                int size = 0;
 
@@ -264,7 +283,6 @@ int main(int argc, char *argv[]){
                    if (rc < 0){
                       if (errno != EWOULDBLOCK){
                          perror("  recv() failed");
-                         //sclose_conn = TRUE;
                       }
                       else{
                          printf("読み込めるデータがない\n");
