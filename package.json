@@ -1,0 +1,22 @@
+{
+  "name": "web_server",
+  "version": "1.0.0",
+  "description": "httpサーバの自作に挑戦",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TakuyaKurimoto/web_server.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/TakuyaKurimoto/web_server/issues"
+  },
+  "homepage": "https://github.com/TakuyaKurimoto/web_server#readme",
+  "dependencies": {
+    "express": "^4.17.3"
+  }
+}
