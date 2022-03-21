@@ -6,9 +6,16 @@ app.use(bodyParser.urlencoded({
     extended: true
 }));
 app.use(bodyParser.json());
+
+const hoge = { a: 12123212322222222222222222222222222222222222, b: 343222222222222222222222222222222222222222222222222222222323 }
+const resp = []
+for (i = 0; i < 100000; i++){
+  resp.push(hoge)
+}
+resp.push({a:1})
 app.get('/', (req, res) => {
   console.log('Hello World!')
-  res.send('Hello World!')
+  res.send("hoge")
 })
 
 app.post('/', (req, res) => {

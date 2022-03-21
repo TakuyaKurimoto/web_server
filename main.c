@@ -94,17 +94,103 @@ void send_http_request(int descriptor, char* buffer) {
   
 }
 
+void _acceptNewInComingSocket(int listening_socket){
+   printf("  Listening socket is readable\n");
+   int conn_sock = accept(listening_socket,NULL, NULL);
+   if (conn_sock == -1) {
+      perror("accept");
+      exit(EXIT_FAILURE);
+   }      
+   
+   _makeNonBlocking(conn_sock);
+   ev.events = EPOLLIN | EPOLLET;
+   ev.data.fd = conn_sock;
+   if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,&ev) == -1) {
+      perror("epoll_ctl: conn_sock");
+      exit(EXIT_FAILURE);
+   }
+
+   descriptor_array[conn_sock].is_from_server = 1;
+   printf("  New incoming connection - %d\n", conn_sock);
+}
+
+void _getDataFromServerAndSendDataToClient(int sock){
+   char buf[5000];
+   while(1){
+      memset(buf, 0, sizeof(buf));
+      int rc = recv(sock, buf, sizeof(buf), 0);
+      printf("RECEIVE %d バイト \n",rc);
+      if (rc < 0){
+         if (errno != EWOULDBLOCK){
+            perror("  recv() failed");
+         }
+         else{
+            printf("読み込めるデータがない\n");
+         }
+         break;
+      }
+      else if (rc == 0){
+         printf("  Connection closed\n");
+         _closeConnection(sock);
+         //リクエストを全部送ったことを知らせる。
+         _closeConnection(descriptor_array[sock].num);
+         break;
+      }
+
+      rc = send(descriptor_array[sock].num, buf, strlen(buf), 0); 
+      if (rc < 0){
+         perror("  send() failed");
+      }
+      printf("クライアントにサーバからのデータを転送した!\n");  
+   }
+}
+
+void _getDataFromClientAndSendDataToServer(int sock){
+   printf("  Descriptor %d is readable\n", sock);           
+   while(1)
+   {
+      char buffer[5000];
+      memset(buffer, 0, sizeof(buffer));
+      int rc = recv(sock, buffer, sizeof(buffer), 0);
+      
+      if (rc < 0)
+      {
+         if (errno != EWOULDBLOCK)
+         {
+            perror("  recv() failed");
+         }
+         else{
+             printf("読み込めるデータがありません\n");
+             //_closeConnection(i);
+         }
+         break;
+      }
+
+      if (rc == 0)
+      {
+         printf("  Connection closedされました %d\n", sock);
+         _closeConnection(sock);
+         break;
+      }
+      
+      printf("  %d bytes received\n", rc);
+      
+      send_http_request(sock, buffer);
+   } 
+}
+
+
+
 int main(int argc, char *argv[]){
    _setup();
 
    int listening_socket;
    struct sockaddr_in sin;
-   int len, ret;
+   int ret;
    int on = 1;
    int port = 80;
-   char buffer[5000];
    //Request *request;
-   int conn_sock, nfds;
+   int nfds;
 
    // socket 作成　返り値はファイルディスクリプタ
    listening_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -160,130 +246,13 @@ int main(int argc, char *argv[]){
       }
       
       for (int n = 0; n < nfds; ++n) {
-         int i = events[n].data.fd;
-         if (i == listening_socket)
-         {
-            printf("  Listening socket is readable\n");
-            conn_sock = accept(listening_socket,NULL, NULL);
-            if (conn_sock == -1) {
-               perror("accept");
-               exit(EXIT_FAILURE);
-            }      
-            
-            _makeNonBlocking(conn_sock);
-            ev.events = EPOLLIN | EPOLLET;
-            ev.data.fd = conn_sock;
-            if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,&ev) == -1) {
-               perror("epoll_ctl: conn_sock");
-               exit(EXIT_FAILURE);
-            }
-                  
-            descriptor_array[conn_sock].is_from_server = 1;
-
-            printf("  New incoming connection - %d\n", conn_sock);
-         }
+         int sock = events[n].data.fd;
+         if (sock == listening_socket) _acceptNewInComingSocket(listening_socket);
 
          //サーバからデータが送られてきた場合
-         else if(!descriptor_array[i].is_from_server){
-
-            char buf[100000];
-            int size = 0;
-            while(1){
-                memset(buf, 0, sizeof(buf));
-                int rc = recv(i, buf, sizeof(buf), 0);
-                printf("RECEIVE %d バイト \n",rc);
-                if (rc < 0){
-                   if (errno != EWOULDBLOCK){
-                      perror("  recv() failed");
-                   }
-                   else{
-                      printf("読み込めるデータがない\n");
-                   }
-                   break;
-                }
-                else if (rc == 0){
-                   printf("  Connection closed\n");
-                   _closeConnection(i);
-                   //リクエストを全部送ったことを知らせる。
-                   _closeConnection(descriptor_array[i].num);
-                   break;
-                }
-                //printf("%s\n", buf);
-                rc = send(descriptor_array[i].num, buf, strlen(buf), 0);
-                printf("クライアントにサーバからのデータを転送した!\n");
-        
-                   if (rc < 0){
-                      perror("  send() failed");
-                   }
-                   size += rc;
-               }
-            }
-            else
-            {
-               printf("  Descriptor %d is readable\n", i);
-               
-               /*************************************************/
-               /* Receive all incoming data on this socket      */
-               /* before we loop back and call select again.    */
-               /*************************************************/
-               
-               do
-               {
-                  /**********************************************/
-                  /* Receive data on this connection until the  */
-                  /* recv fails with EWOULDBLOCK.  If any other */
-                  /* failure occurs, we will close the          */
-                  /* connection.                                */
-                  /**********************************************/
-                 
-                  int rc = recv(i, buffer, sizeof(buffer), 0);
-                  
-                  if (rc < 0)
-                  {
-                     if (errno != EWOULDBLOCK)
-                     {
-                        perror("  recv() failed");
-                     }
-                     else{
-                         printf("読み込めるデータがありません\n");
-                         //_closeConnection(i);
-                     }
-                  break;
-                  }
-
-                  /**********************************************/
-                  /* Check to see if the connection has been    */
-                  /* closed by the client                       */
-                  /**********************************************/
-                  if (rc == 0)
-                  {
-                     printf("  Connection closedされました %i\n", i);
-
-                     _closeConnection(i);
-                     break;
-                  }
-
-                  /**********************************************/
-                  /* Data was received                          */
-                  /**********************************************/
-                  len = rc;
-                  
-                  printf("  %d bytes received\n", len);
-                  
-                  
-                  //メモリを解放するのを忘れないこと。
-                  //todo リクエストが分割して送られて来た時の対応
-                  //request = (Request*)calloc(sizeof(Request),1);
-
-                  //http_parse(buffer, request);
-                  
-                  send_http_request(i, buffer);
-                  //free(request);
-                  //send_http_requestで既にconnection close してる
-                  
-               } while (TRUE);
-            } 
-         } 
+         else if(!descriptor_array[sock].is_from_server) _getDataFromServerAndSendDataToClient(sock);
+         else _getDataFromClientAndSendDataToServer(sock);     
       } 
+   }
 }
 
