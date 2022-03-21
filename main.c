@@ -1,17 +1,16 @@
 //参考　https://www.ibm.com/docs/ja/i/7.2?topic=designs-example-nonblocking-io-select
 
 #include "util.h"
+#include <sys/epoll.h>
 
 #define BUF_LEN 256             /* バッファのサイズ */
 #define TRUE             1
 #define FALSE            0
+#define MAX_EVENTS 10 
 
-fd_set master_set;
-int max_sd;
-//サーバとのソケットは1以上(そのサーバとのソケットを転送すべきクライアントとのソケット番号)、クライアントとのソケットは0
-
+struct epoll_event ev, events[MAX_EVENTS]; 
+int epollfd;
 static struct Descriptor descriptor_array[5000];
-
 static unsigned int ip_addr;
 static int port = 3000;
 static char *hostname = "app";
@@ -19,13 +18,9 @@ static char *hostname = "app";
 void _closeConnection(int descriptor){
    printf("close connection%d\n", descriptor);
    close(descriptor);
-   FD_CLR(descriptor, &master_set);
+   epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
+
    descriptor_array[descriptor_array[descriptor].num].status = CLOSE;
-   if (descriptor == max_sd)
-   {
-      while (FD_ISSET(max_sd, &master_set) == FALSE)
-         max_sd -= 1;
-    }
 }
 
 /**
@@ -67,13 +62,18 @@ void send_http_request(int descriptor, char* buffer) {
       if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) printf("connectに失敗 errno = %d\n", errno);
       printf("サーバーとコネクト成功。descriptor = %d\n", sock);
 
-      FD_SET(sock, &master_set);
-      if (sock > max_sd)   max_sd = sock;
       if (ioctl(sock, FIONBIO, (char *)&on) < 0)
       {
          perror("ioctl() failed");
          close(sock);
          exit(-1);
+      }
+      ev.events = EPOLLIN | EPOLLET;
+      ev.data.fd = sock;
+      if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock,
+                  &ev) == -1) {
+          perror("epoll_ctl: conn_sock");
+          exit(EXIT_FAILURE);
       }
       
       descriptor_array[sock].num = descriptor;
@@ -95,11 +95,9 @@ int main(int argc, char *argv[]){
    int len, ret;
    int on = 1;
    int port = 80;
-   int new_sd;
-   fd_set working_set;
-   struct timeval timeout;
    char buffer[5000];
    Request *request;
+   int conn_sock, nfds;
 
    // socket 作成　返り値はファイルディスクリプタ
    listening_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -147,158 +145,77 @@ int main(int argc, char *argv[]){
     }
     printf("ポート番号%dでlisten start !!!。\n", port);
 
+    epollfd = epoll_create1(0);
+    if (epollfd == -1)
+    {
+        perror("epoll_create1");
+        exit(EXIT_FAILURE);
+    }
 
-    FD_ZERO(&master_set);
-    max_sd = listening_socket;
-    FD_SET(listening_socket, &master_set);
-
-    /*************************************************************/
-    /* Initialize the timeval struct to 3 minutes.  If no        */
-    /* activity after 3 minutes this program will end.           */
-    /*************************************************************/
-    timeout.tv_sec  = 3 * 60;
-    timeout.tv_usec = 0;
+    ev.events = EPOLLIN; ev.data.fd = listening_socket; if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listening_socket, &ev) == -1) {
+        perror("epoll_ctl: listen_sock");
+        exit(EXIT_FAILURE); }
 
     while (1){
+      printf("Waiting on epoll()...\n");
 
-        /**********************************************************/
-      /* Copy the master fd_set over to the working fd_set.     */
-      /**********************************************************/
-      memcpy(&working_set, &master_set, sizeof(master_set));
-      new_sd = 0;
-      /**********************************************************/
-      /* Call select() and wait 3 minutes for it to complete.   */
-      /**********************************************************/
-      printf("Waiting on select()...\n");
-      int rc = select(max_sd + 1, &working_set, NULL, NULL, &timeout);
-
-      /**********************************************************/
-      /* Check to see if the select call failed.                */
-      /**********************************************************/
-      if (rc < 0)
-      {
-         perror("  select() failed");
-         break;
+      nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+      if (nfds == -1) {
+          perror("epoll_wait");
+          exit(EXIT_FAILURE);
       }
-
-      /**********************************************************/
-      /* Check to see if the 3 minute time out expired.         */
-      /**********************************************************/
-      if (rc == 0)
-      {
-         printf("  select() timed out.  End program.\n");
-         break;
-      }
-
-      /**********************************************************/
-      /* One or more descriptors are readable.  Need to         */
-      /* determine which ones they are.                         */
-      /**********************************************************/
-      int desc_ready = rc;
       
-      for (int i = 0; i <= max_sd && desc_ready > 0; ++i)
-      {
-         /*******************************************************/
-         /* Check to see if this descriptor is ready            */
-         /*******************************************************/
-         if (FD_ISSET(i, &working_set))
+      for (int n = 0; n < nfds; ++n) {
+         int i = events[n].data.fd;
+         if (i == listening_socket)
          {
-            /****************************************************/
-            /* A descriptor was found that was readable - one   */
-            /* less has to be looked for.  This is being done   */
-            /* so that we can stop looking at the working set   */
-            /* once we have found all of the descriptors that   */
-            /* were ready.                                      */
-            /****************************************************/
-            desc_ready -= 1;
-
-            /****************************************************/
-            /* Check to see if this is the listening socket     */
-            /****************************************************/
-            if (i == listening_socket)
-            {
-               printf("  Listening socket is readable\n");
-               
-               /*************************************************/
-               /* Accept all incoming connections that are      */
-               /* queued up on the listening socket before we   */
-               /* loop back and call select again.              */
-               /*************************************************/
-               while (new_sd != -1)//「グローバル」変数は初期値がない場合は0に初期化される。ローカル変数は何が入るかわからない
-               {
-                   
-                   /**********************************************/
-                   /* Accept each incoming connection.  If       */
-                   /* accept fails with EWOULDBLOCK, then we     */
-                   /* have accepted all of them.  Any other      */
-                   /* failure on accept will cause us to end the */
-                   /* server.                                    */
-                   /**********************************************/
-                   
-                   new_sd = accept(listening_socket, NULL, NULL);
-                  
-                   descriptor_array[new_sd].is_from_server = 1;
-                   if (new_sd < 0)
-                   {
-                       if (errno != EWOULDBLOCK)
-                       {
-                           perror("  accept() failed");
-                       }
-                       
-                       break;
-                  }
-
-                  /**********************************************/
-                  /* Add the new incoming connection to the     */
-                  /* master read set                            */
-                  /**********************************************/
-                  printf("  New incoming connection - %d\n", new_sd);
-                  FD_SET(new_sd, &master_set);
-                  
-                  if (new_sd > max_sd)
-                     max_sd = new_sd;
-                  /**********************************************/
-                  /* Loop back up and accept another incoming   */
-                  /* connection                                 */
-                  /**********************************************/
-               }
-               
+            printf("  Listening socket is readable\n");
+             conn_sock = accept(listening_socket,NULL, NULL);
+             if (conn_sock == -1) {
+                 perror("accept");
+                 exit(EXIT_FAILURE);
+             }      
+            ev.events = EPOLLIN | EPOLLET;
+            ev.data.fd = conn_sock;
+            if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,&ev) == -1) {
+               perror("epoll_ctl: conn_sock");
+               exit(EXIT_FAILURE);
             }
+                  
+            descriptor_array[conn_sock].is_from_server = 1;
 
-            //サーバからデータが送られてきた場合
-            else if(!descriptor_array[i].is_from_server){
-            
-               char buf[100000];
-               int size = 0;
+            printf("  New incoming connection - %d\n", conn_sock);
+         }
 
-               while(1){
-                   memset(buf, 0, sizeof(buf));
+         //サーバからデータが送られてきた場合
+         else if(!descriptor_array[i].is_from_server){
 
-                   int rc = recv(i, buf, sizeof(buf), 0);
-                   printf("RECEIVE %d バイト \n",rc);
-
-                   if (rc < 0){
-                      if (errno != EWOULDBLOCK){
-                         perror("  recv() failed");
-                      }
-                      else{
-                         printf("読み込めるデータがない\n");
-                      }
-                      break;
+            char buf[100000];
+            int size = 0;
+            while(1){
+                memset(buf, 0, sizeof(buf));
+                int rc = recv(i, buf, sizeof(buf), 0);
+                printf("RECEIVE %d バイト \n",rc);
+                if (rc < 0){
+                   if (errno != EWOULDBLOCK){
+                      perror("  recv() failed");
                    }
-                   else if (rc == 0){
-                      printf("  Connection closed\n");
-                      _closeConnection(i);
-                      //リクエストを全部送ったことを知らせる。
-                      _closeConnection(descriptor_array[i].num);
-                      break;
+                   else{
+                      printf("読み込めるデータがない\n");
                    }
-                   //printf("%s\n", buf);
-                   rc = send(descriptor_array[i].num, buf, strlen(buf), 0);
-                   printf("クライアントにサーバからのデータを転送した!\n");
-                   printf("%s\n",buf);
-
-
+                   break;
+                }
+                else if (rc == 0){
+                   printf("  Connection closed\n");
+                   _closeConnection(i);
+                   //リクエストを全部送ったことを知らせる。
+                   _closeConnection(descriptor_array[i].num);
+                   break;
+                }
+                //printf("%s\n", buf);
+                rc = send(descriptor_array[i].num, buf, strlen(buf), 0);
+                printf("クライアントにサーバからのデータを転送した!\n");
+        
                    if (rc < 0){
                       perror("  send() failed");
                    }
@@ -323,7 +240,7 @@ int main(int argc, char *argv[]){
                   /* connection.                                */
                   /**********************************************/
                  
-                  rc = recv(i, buffer, sizeof(buffer), 0);
+                  int rc = recv(i, buffer, sizeof(buffer), 0);
                   
                   if (rc < 0)
                   {
@@ -373,13 +290,5 @@ int main(int argc, char *argv[]){
             } 
          } 
       } 
-    }
-    ret = close(listening_socket);
-    if ( ret == -1 ){
-        perror("close");
-        exit(1);
-    }
-
-    return 0;
 }
 
