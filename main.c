@@ -45,11 +45,23 @@ void _setup(){
     ip_addr = addrs.s_addr;
 }
 
+void _makeNonBlocking(int descriptor){
+   int on = 1;
+   //ソケットをノンブロッキングモードにする　https://www.geekpage.jp/programming/linux-network/nonblocking.php
+   //fcntlでも代用可
+   if (ioctl(descriptor, FIONBIO, (char *)&on) < 0)
+   {
+      perror("ioctl() failed");
+      close(descriptor);
+      exit(-1);
+   }
+}
+
 void send_http_request(int descriptor, char* buffer) {
 
    if (!descriptor_array[descriptor].status)
    {
-      int sock, on = 1;
+      int sock;
       if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) perror("socketに失敗");
 
       struct sockaddr_in addr;
@@ -61,13 +73,8 @@ void send_http_request(int descriptor, char* buffer) {
       
       if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) printf("connectに失敗 errno = %d\n", errno);
       printf("サーバーとコネクト成功。descriptor = %d\n", sock);
-
-      if (ioctl(sock, FIONBIO, (char *)&on) < 0)
-      {
-         perror("ioctl() failed");
-         close(sock);
-         exit(-1);
-      }
+      _makeNonBlocking(sock);
+      
       ev.events = EPOLLIN | EPOLLET;
       ev.data.fd = sock;
       if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock,
@@ -96,7 +103,7 @@ int main(int argc, char *argv[]){
    int on = 1;
    int port = 80;
    char buffer[5000];
-   Request *request;
+   //Request *request;
    int conn_sock, nfds;
 
    // socket 作成　返り値はファイルディスクリプタ
@@ -113,20 +120,7 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
-    /*************************************************************/
-    /* Set socket to be nonblocking. All of the sockets for      */
-    /* the incoming connections will also be nonblocking since   */
-    /* they will inherit that state from the listening socket.   */
-    /*************************************************************/
-    //ソケットをノンブロッキングモードにする　https://www.geekpage.jp/programming/linux-network/nonblocking.php
-    //fcntlでも代用可
-    if (ioctl(listening_socket, FIONBIO, (char *)&on) < 0)
-    {
-       perror("ioctl() failed");
-       close(listening_socket);
-       exit(-1);
-    }
-	//スタック上のローカル変数の初期値は不定だから初期化https://neineigh.hatenablog.com/entry/2013/09/28/185053
+    //スタック上のローカル変数の初期値は不定だから初期化https://neineigh.hatenablog.com/entry/2013/09/28/185053
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
     sin.sin_port = htons(port);
@@ -170,11 +164,13 @@ int main(int argc, char *argv[]){
          if (i == listening_socket)
          {
             printf("  Listening socket is readable\n");
-             conn_sock = accept(listening_socket,NULL, NULL);
-             if (conn_sock == -1) {
-                 perror("accept");
-                 exit(EXIT_FAILURE);
-             }      
+            conn_sock = accept(listening_socket,NULL, NULL);
+            if (conn_sock == -1) {
+               perror("accept");
+               exit(EXIT_FAILURE);
+            }      
+            
+            _makeNonBlocking(conn_sock);
             ev.events = EPOLLIN | EPOLLET;
             ev.data.fd = conn_sock;
             if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,&ev) == -1) {
@@ -252,7 +248,6 @@ int main(int argc, char *argv[]){
                          printf("読み込めるデータがありません\n");
                          //_closeConnection(i);
                      }
-                     
                   break;
                   }
 
@@ -278,14 +273,14 @@ int main(int argc, char *argv[]){
                   
                   //メモリを解放するのを忘れないこと。
                   //todo リクエストが分割して送られて来た時の対応
-                  request = (Request*)calloc(sizeof(Request),1);
+                  //request = (Request*)calloc(sizeof(Request),1);
 
-                  http_parse(buffer, request);
+                  //http_parse(buffer, request);
                   
                   send_http_request(i, buffer);
-                  free(request);
+                  //free(request);
                   //send_http_requestで既にconnection close してる
-                  break;
+                  
                } while (TRUE);
             } 
          } 
