@@ -20,6 +20,7 @@ void _closeConnection(int descriptor){
    printf("close connection%d\n", descriptor);
    close(descriptor);
    FD_CLR(descriptor, &master_set);
+   descriptor_array[descriptor_array[descriptor].num].status = CLOSE;
    if (descriptor == max_sd)
    {
       while (FD_ISSET(max_sd, &master_set) == FALSE)
@@ -51,50 +52,44 @@ void _setup(){
 
 void send_http_request(int descriptor, char* buffer) {
 
-  int sock, on = 1;
-  
-  if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-     perror("socketに失敗");
+   if (!descriptor_array[descriptor].status)
+   {
+      int sock, on = 1;
+      if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) perror("socketに失敗");
 
-  struct sockaddr_in addr;
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = ip_addr;
-  addr.sin_port = htons(port);
+      struct sockaddr_in addr;
+      addr.sin_family = AF_INET;
+      addr.sin_addr.s_addr = ip_addr;
+      addr.sin_port = htons(port);
 
-   
-  
-  if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-     printf("connectに失敗 errno = %d\n", errno);
+         
+      
+      if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) printf("connectに失敗 errno = %d\n", errno);
+      printf("サーバーとコネクト成功。descriptor = %d\n", sock);
 
-   if (ioctl(sock, FIONBIO, (char *)&on) < 0)
-    {
-       perror("ioctl() failed");
-       close(sock);
-       exit(-1);
-    }
-    
-    descriptor_array[sock].num = descriptor;
-    descriptor_array[sock].is_from_server = 0;
-
-    if (send(sock, buffer, strlen(buffer), 0) == -1)
-       perror("sendに失敗");
-   
-    descriptor_array[descriptor].num = sock;
-
-    FD_SET(sock, &master_set);
-
-    if (sock > max_sd)
-       max_sd = sock;
+      FD_SET(sock, &master_set);
+      if (sock > max_sd)   max_sd = sock;
+      if (ioctl(sock, FIONBIO, (char *)&on) < 0)
+      {
+         perror("ioctl() failed");
+         close(sock);
+         exit(-1);
+      }
+      
+      descriptor_array[sock].num = descriptor;
+      descriptor_array[sock].is_from_server = 0;
+      descriptor_array[sock].status = OPEN;
+      descriptor_array[descriptor].num = sock;
+      descriptor_array[descriptor].status = OPEN;
+   }
+   if (send(descriptor_array[descriptor].num, buffer, strlen(buffer), 0) == -1) perror("sendに失敗");
+   printf("サーバーに%ldバイト転送した\n", strlen(buffer));
   
 }
 
 int main(int argc, char *argv[]){
    _setup();
 
-   for (int i = 0; i < 5000; i++){
-      descriptor_array[i].num = 0;
-      descriptor_array[i].is_from_server = 0;
-   }
    int listening_socket;
    struct sockaddr_in sin;
    int len, ret;
@@ -259,7 +254,7 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   printf("  New incoming connection - %d\n", new_sd);
                   FD_SET(new_sd, &master_set);
-                  printf("hoghogehoge");
+                  
                   if (new_sd > max_sd)
                      max_sd = new_sd;
                   /**********************************************/
@@ -300,7 +295,8 @@ int main(int argc, char *argv[]){
                    }
                    //printf("%s\n", buf);
                    rc = send(descriptor_array[i].num, buf, strlen(buf), 0);
-                   printf("クライアントにサーバからのデータを転送した!");
+                   printf("クライアントにサーバからのデータを転送した!\n");
+                   printf("%s\n",buf);
 
 
                    if (rc < 0){

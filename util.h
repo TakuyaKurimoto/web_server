@@ -12,6 +12,9 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 
+#define OPEN          1
+#define CLOSE         0
+
 void http_parse();
 
 typedef struct  {          
@@ -21,4 +24,5 @@ typedef struct  {
 struct Descriptor {          
    int is_from_server;
    int num;
+   int status;
 };
