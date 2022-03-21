@@ -10,17 +10,19 @@ fd_set master_set;
 int max_sd;
 //サーバとのソケットは1以上(そのサーバとのソケットを転送すべきクライアントとのソケット番号)、クライアントとのソケットは0
 
-struct Descriptor* descriptor_array[5000];
+static struct Descriptor descriptor_array[5000];
+
 static unsigned int ip_addr;
 static int port = 3000;
 static char *hostname = "app";
 
 void _closeConnection(int descriptor){
-    close(descriptor);
-    FD_CLR(descriptor, &master_set);
-    if (descriptor == max_sd)
-    {
-       while (FD_ISSET(max_sd, &master_set) == FALSE)
+   printf("close connection%d\n", descriptor);
+   close(descriptor);
+   FD_CLR(descriptor, &master_set);
+   if (descriptor == max_sd)
+   {
+      while (FD_ISSET(max_sd, &master_set) == FALSE)
          max_sd -= 1;
     }
 }
@@ -71,15 +73,13 @@ void send_http_request(int descriptor, char* buffer) {
        exit(-1);
     }
     
-    struct Descriptor *des = calloc(1, sizeof(struct Descriptor));
-    des->num = descriptor;
-    des->is_from_server = 0;
-    descriptor_array[sock] = des;
+    descriptor_array[sock].num = descriptor;
+    descriptor_array[sock].is_from_server = 0;
 
     if (send(sock, buffer, strlen(buffer), 0) == -1)
        perror("sendに失敗");
    
-    descriptor_array[descriptor]->num = sock;
+    descriptor_array[descriptor].num = sock;
 
     FD_SET(sock, &master_set);
 
@@ -90,6 +90,11 @@ void send_http_request(int descriptor, char* buffer) {
 
 int main(int argc, char *argv[]){
    _setup();
+
+   for (int i = 0; i < 5000; i++){
+      descriptor_array[i].num = 0;
+      descriptor_array[i].is_from_server = 0;
+   }
    int listening_socket;
    struct sockaddr_in sin;
    int len, ret;
@@ -236,10 +241,8 @@ int main(int argc, char *argv[]){
                    /**********************************************/
                    
                    new_sd = accept(listening_socket, NULL, NULL);
-                   
-                  struct Descriptor *des = calloc(1, sizeof(struct Descriptor));
-                  des->is_from_server = 1;
-                  descriptor_array[new_sd] = des;
+                  
+                   descriptor_array[new_sd].is_from_server = 1;
                    if (new_sd < 0)
                    {
                        if (errno != EWOULDBLOCK)
@@ -256,20 +259,20 @@ int main(int argc, char *argv[]){
                   /**********************************************/
                   printf("  New incoming connection - %d\n", new_sd);
                   FD_SET(new_sd, &master_set);
-                  
+                  printf("hoghogehoge");
                   if (new_sd > max_sd)
                      max_sd = new_sd;
-
                   /**********************************************/
                   /* Loop back up and accept another incoming   */
                   /* connection                                 */
                   /**********************************************/
-               } 
+               }
                
             }
-            
+
             //サーバからデータが送られてきた場合
-            else if(!descriptor_array[i]->is_from_server){
+            else if(!descriptor_array[i].is_from_server){
+            
                char buf[100000];
                int size = 0;
 
@@ -292,11 +295,11 @@ int main(int argc, char *argv[]){
                       printf("  Connection closed\n");
                       _closeConnection(i);
                       //リクエストを全部送ったことを知らせる。
-                      _closeConnection(descriptor_array[i]->num);
+                      _closeConnection(descriptor_array[i].num);
                       break;
                    }
                    //printf("%s\n", buf);
-                   rc = send(descriptor_array[i]->num, buf, strlen(buf), 0);
+                   rc = send(descriptor_array[i].num, buf, strlen(buf), 0);
                    printf("クライアントにサーバからのデータを転送した!");
 
 
