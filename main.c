@@ -14,6 +14,8 @@ static struct Descriptor descriptor_array[5000];
 static unsigned int ip_addr;
 static int port = 3000;
 static char *hostname = "app";
+//ローカル変数にしてしまうと、毎回メモリ確保で遅くなるので、グローバル変数にしてしまう。
+static char buf[5000];
 
 void _closeConnection(int descriptor){
    printf("close connection%d\n", descriptor);
@@ -57,7 +59,7 @@ void _makeNonBlocking(int descriptor){
    }
 }
 
-void send_http_request(int descriptor, char* buffer) {
+void send_http_request(int descriptor) {
 
    if (!descriptor_array[descriptor].status)
    {
@@ -89,8 +91,8 @@ void send_http_request(int descriptor, char* buffer) {
       descriptor_array[descriptor].num = sock;
       descriptor_array[descriptor].status = OPEN;
    }
-   if (send(descriptor_array[descriptor].num, buffer, strlen(buffer), 0) == -1) perror("sendに失敗");
-   printf("サーバーに%ldバイト転送した\n", strlen(buffer));
+   if (send(descriptor_array[descriptor].num, buf, strlen(buf), 0) == -1) perror("sendに失敗");
+   printf("サーバーに%ldバイト転送した\n", strlen(buf));
   
 }
 
@@ -115,7 +117,6 @@ void _acceptNewInComingSocket(int listening_socket){
 }
 
 void _getDataFromServerAndSendDataToClient(int sock){
-   char buf[5000];
    while(1){
       memset(buf, 0, sizeof(buf));
       int rc = recv(sock, buf, sizeof(buf), 0);
@@ -149,9 +150,8 @@ void _getDataFromClientAndSendDataToServer(int sock){
    printf("  Descriptor %d is readable\n", sock);           
    while(1)
    {
-      char buffer[5000];
-      memset(buffer, 0, sizeof(buffer));
-      int rc = recv(sock, buffer, sizeof(buffer), 0);
+      memset(buf, 0, sizeof(buf));
+      int rc = recv(sock, buf, sizeof(buf), 0);
       
       if (rc < 0)
       {
@@ -175,7 +175,7 @@ void _getDataFromClientAndSendDataToServer(int sock){
       
       printf("  %d bytes received\n", rc);
       
-      send_http_request(sock, buffer);
+      send_http_request(sock);
    } 
 }
 
