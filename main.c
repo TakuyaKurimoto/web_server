@@ -2,26 +2,41 @@
 
 #include "util.h"
 #include <sys/epoll.h>
+#include "pthread.h"
 
 #define BUF_LEN 256             /* バッファのサイズ */
 #define TRUE             1
 #define FALSE            0
-#define MAX_EVENTS 10 
+#define MAX_EVENTS 20 
+#define CLIENT 0
+#define SERVER 1 
 
 struct epoll_event ev, events[MAX_EVENTS]; 
 int epollfd;
+int client_epollfd, server_epollfd;
 static struct Descriptor descriptor_array[5000];
 static unsigned int ip_addr;
 static int port = 3000;
 static char *hostname = "app";
 //ローカル変数にしてしまうと、毎回メモリ確保で遅くなるので、グローバル変数にしてしまう。
 static char buf[5000];
+static char buffer[5000];
 
-void _closeConnection(int descriptor){
+void _closeConnection(int descriptor, int type){
    printf("close connection%d\n", descriptor);
    close(descriptor);
-   epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
+   switch (type){
+      case CLIENT:
+         epoll_ctl(client_epollfd, EPOLL_CTL_DEL, descriptor, NULL);
+         break;
+      case SERVER:
+         epoll_ctl(server_epollfd, EPOLL_CTL_DEL, descriptor, NULL);
+         break;
+      default:
+         epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
+   }
 
+   //mutex必要かも
    descriptor_array[descriptor_array[descriptor].num].status = CLOSE;
 }
 
@@ -79,8 +94,7 @@ void send_http_request(int descriptor) {
       
       ev.events = EPOLLIN | EPOLLET;
       ev.data.fd = sock;
-      if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock,
-                  &ev) == -1) {
+      if (epoll_ctl(server_epollfd, EPOLL_CTL_ADD, sock, &ev) == -1) {
           perror("epoll_ctl: conn_sock");
           exit(EXIT_FAILURE);
       }
@@ -91,8 +105,8 @@ void send_http_request(int descriptor) {
       descriptor_array[descriptor].num = sock;
       descriptor_array[descriptor].status = OPEN;
    }
-   if (send(descriptor_array[descriptor].num, buf, strlen(buf), 0) == -1) perror("sendに失敗");
-   printf("サーバーに%ldバイト転送した\n", strlen(buf));
+   if (send(descriptor_array[descriptor].num, buffer, strlen(buffer), 0) == -1) perror("sendに失敗");
+   printf("サーバーに%ldバイト転送した\n", strlen(buffer));
   
 }
 
@@ -107,7 +121,7 @@ void _acceptNewInComingSocket(int listening_socket){
    _makeNonBlocking(conn_sock);
    ev.events = EPOLLIN | EPOLLET;
    ev.data.fd = conn_sock;
-   if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,&ev) == -1) {
+   if (epoll_ctl(client_epollfd, EPOLL_CTL_ADD, conn_sock,&ev) == -1) {
       perror("epoll_ctl: conn_sock");
       exit(EXIT_FAILURE);
    }
@@ -116,73 +130,137 @@ void _acceptNewInComingSocket(int listening_socket){
    printf("  New incoming connection - %d\n", conn_sock);
 }
 
-void _getDataFromServerAndSendDataToClient(int sock){
-   while(1){
-      memset(buf, 0, sizeof(buf));
-      int rc = recv(sock, buf, sizeof(buf), 0);
-      printf("RECEIVE %d バイト \n",rc);
-      if (rc < 0){
-         if (errno != EWOULDBLOCK){
-            perror("  recv() failed");
-         }
-         else{
-            printf("読み込めるデータがない\n");
-         }
-         break;
-      }
-      else if (rc == 0){
-         printf("  Connection closed\n");
-         _closeConnection(sock);
-         //リクエストを全部送ったことを知らせる。
-         _closeConnection(descriptor_array[sock].num);
-         break;
+void * getDataFromServerAndSendDataToClient(void *arg){
+   struct epoll_event events[MAX_EVENTS]; 
+   int nfds, err, rc;
+
+   server_epollfd = epoll_create1(0);
+
+   if (server_epollfd == -1)
+   {
+      perror("epoll_create1");
+      exit(EXIT_FAILURE);
+   }
+
+   while (1){
+      printf("Waiting on epoll() [server]...\n");
+
+      nfds = epoll_wait(server_epollfd, events, MAX_EVENTS, -1);
+      if (nfds == -1) {
+          perror("epoll_wait");
+          exit(EXIT_FAILURE);
       }
 
-      rc = send(descriptor_array[sock].num, buf, strlen(buf), 0); 
-      if (rc < 0){
-         perror("  send() failed");
+      for (int n = 0; n < nfds; ++n) {
+         int sock = events[n].data.fd;
+
+         while(1){
+            memset(buf, 0, sizeof(buf));
+            rc = recv(sock, buf, sizeof(buf), 0);
+
+            if (rc < 0){
+               if (errno != EWOULDBLOCK){
+                  perror("  recv() failed");
+               }
+               else{
+                  printf("読み込めるデータがない\n");
+               }
+               break;
+            }
+            else if (rc == 0){
+               printf("  Connection closed\n");
+               _closeConnection(sock, SERVER);
+               //リクエストを全部送ったことを知らせる。
+               _closeConnection(descriptor_array[sock].num, CLIENT);
+               break;
+            }
+
+            printf("RECEIVE %d バイト \n",rc);
+
+            err = send(descriptor_array[sock].num, buf, strlen(buf), 0); 
+            if (err < 0){
+               perror("  send() failed");
+            }
+            printf("クライアントにサーバからのデータを転送した!\n");  
+         }
       }
-      printf("クライアントにサーバからのデータを転送した!\n");  
    }
 }
 
-void _getDataFromClientAndSendDataToServer(int sock){
-   printf("  Descriptor %d is readable\n", sock);           
-   while(1)
-   {
-      memset(buf, 0, sizeof(buf));
-      int rc = recv(sock, buf, sizeof(buf), 0);
-      
-      if (rc < 0)
-      {
-         if (errno != EWOULDBLOCK)
-         {
-            perror("  recv() failed");
-         }
-         else{
-             printf("読み込めるデータがありません\n");
-             //_closeConnection(i);
-         }
-         break;
-      }
+void * getDataFromClientAndSendDataToServer(void *arg){
+   struct epoll_event events[MAX_EVENTS]; 
+   int nfds;
+   client_epollfd = epoll_create1(0);
 
-      if (rc == 0)
-      {
-         printf("  Connection closedされました %d\n", sock);
-         _closeConnection(sock);
-         break;
+   if (client_epollfd == -1)
+   {
+      perror("epoll_create1");
+      exit(EXIT_FAILURE);
+    }
+    
+   while (1){
+      printf("Waiting on epoll() [client]...\n");
+
+      nfds = epoll_wait(client_epollfd, events, MAX_EVENTS, -1);
+      if (nfds == -1) {
+          perror("epoll_wait");
+          exit(EXIT_FAILURE);
       }
       
-      printf("  %d bytes received\n", rc);
-      
-      send_http_request(sock);
+      for (int n = 0; n < nfds; ++n) {
+         int sock = events[n].data.fd;       
+
+         printf("  Descriptor %d is readable\n", sock);           
+         while(1)
+         {
+            memset(buffer, 0, sizeof(buffer));
+            int rc = recv(sock, buffer, sizeof(buffer), 0);
+            
+            if (rc < 0)
+            {
+               if (errno != EWOULDBLOCK)
+               {
+                  perror("  recv() failed");
+               }
+               else{
+                   printf("読み込めるデータがありません\n");
+               }
+               break;
+            }
+
+            if (rc == 0)
+            {
+               printf("  Connection closedされました %d\n", sock);
+               _closeConnection(sock, CLIENT);
+               break;
+            }     
+            printf("  %d bytes received\n", rc);
+
+            send_http_request(sock);
+         }
+      }
    } 
 }
 
 
 
 int main(int argc, char *argv[]){
+   int err;
+
    _setup();
+   pthread_t thread1, thread2;
+
+   err = pthread_create(&thread1, NULL, getDataFromClientAndSendDataToServer, NULL);
+   if (err) {
+        printf("pthread_create() failure, err=%d", err);
+        return -1;
+    }
+   
+   err = pthread_create(&thread2, NULL, getDataFromServerAndSendDataToClient, NULL);
+   if (err) {
+        printf("pthread_create() failure, err=%d", err);
+        return -1;
+    }
 
    int listening_socket;
    struct sockaddr_in sin;
@@ -237,7 +315,7 @@ int main(int argc, char *argv[]){
         exit(EXIT_FAILURE); }
 
     while (1){
-      printf("Waiting on epoll()...\n");
+      printf("Waiting on epoll() [listening socket]\n");
 
       nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
       if (nfds == -1) {
@@ -246,12 +324,7 @@ int main(int argc, char *argv[]){
       }
       
       for (int n = 0; n < nfds; ++n) {
-         int sock = events[n].data.fd;
-         if (sock == listening_socket) _acceptNewInComingSocket(listening_socket);
-
-         //サーバからデータが送られてきた場合
-         else if(!descriptor_array[sock].is_from_server) _getDataFromServerAndSendDataToClient(sock);
-         else _getDataFromClientAndSendDataToServer(sock);     
+         _acceptNewInComingSocket(listening_socket);  
       } 
    }
 }
