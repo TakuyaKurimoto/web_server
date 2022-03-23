@@ -1,5 +1,4 @@
-//参考　https://www.ibm.com/docs/ja/i/7.2?topic=designs-example-nonblocking-io-select
-
+//epoll はこれを参考にした　https://raskr.hatenablog.com/entry/2018/04/21/143825
 #include "util.h"
 #include <sys/epoll.h>
 #include "pthread.h"
