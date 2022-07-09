@@ -16,8 +16,10 @@ int epollfd;
 int client_epollfd, server_epollfd;
 static struct Descriptor descriptor_array[5000];
 static unsigned int ip_addr;
-static int port = 3000;
-static char *hostname = "app";
+json_t *config;
+json_error_t jerror;
+static int port;
+static char* hostname;
 //ローカル変数にしてしまうと、毎回メモリ確保で遅くなるので、グローバル変数にしてしまう。
 static char buf[5000];
 static char buffer[5000];
@@ -247,7 +249,14 @@ void * getDataFromClientAndSendDataToServer(void *arg){
 int main(int argc, char *argv[]){
    int err;
 
+   // port設定
+   config = json_load_file("config.json",0,&jerror);
+   int self_port = json_integer_value(json_object_get(config, "self_port"));
+   port = json_integer_value(json_object_get(config, "forwarding_port"));
+   hostname = (char*)json_string_value(json_object_get(config, "forwarding_hostname"));
+   
    _setup();
+   
    pthread_t thread1, thread2;
 
    err = pthread_create(&thread1, NULL, getDataFromClientAndSendDataToServer, NULL);
@@ -267,12 +276,6 @@ int main(int argc, char *argv[]){
    int ret;
    int on = 1;
 
-   // port設定
-   json_t *json_object;
-   json_error_t jerror;
-
-   json_object = json_load_file("config.json",0,&jerror);
-   int port = json_integer_value(json_object_get(json_object, "self_port"));
    //Request *request;
    int nfds;
 
@@ -293,7 +296,7 @@ int main(int argc, char *argv[]){
     //スタック上のローカル変数の初期値は不定だから初期化https://neineigh.hatenablog.com/entry/2013/09/28/185053
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
-    sin.sin_port = htons(port);
+    sin.sin_port = htons(self_port);
     sin.sin_addr.s_addr = htonl(INADDR_ANY);//どのipアドレスからのパケットも受け付ける　https://www.wdic.org/w/WDIC/INADDR_ANY
 
 	/* ソケットにアドレスを割り当てる */
@@ -307,7 +310,7 @@ int main(int argc, char *argv[]){
 	perror("listenが失敗");
         exit(1);
     }
-    printf("ポート番号%dでlisten start !!!。\n", port);
+    printf("ポート番号%dでlisten start !!!。\n", self_port);
 
     epollfd = epoll_create1(0);
     if (epollfd == -1)
