@@ -3,7 +3,7 @@ SRCS=$(wildcard *.c)
 OBJS=$(SRCS:.c=.o)
 
 up:$(OBJS)
-	$(CC) $(CFLAGS) -o main $(OBJS); ./main;
+	$(CC) $(CFLAGS) -o main $(OBJS) -ljansson; ./main;
 $(OBJS):util.h
 
 build:

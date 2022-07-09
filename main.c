@@ -2,6 +2,7 @@
 #include "util.h"
 #include <sys/epoll.h>
 #include "pthread.h"
+#include <jansson.h>
 
 #define BUF_LEN 256             /* バッファのサイズ */
 #define TRUE             1
@@ -265,7 +266,13 @@ int main(int argc, char *argv[]){
    struct sockaddr_in sin;
    int ret;
    int on = 1;
-   int port = 80;
+
+   // port設定
+   json_t *json_object;
+   json_error_t jerror;
+
+   json_object = json_load_file("config.json",0,&jerror);
+   int port = json_integer_value(json_object_get(json_object, "self_port"));
    //Request *request;
    int nfds;
 
