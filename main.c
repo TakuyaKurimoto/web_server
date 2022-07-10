@@ -3,13 +3,16 @@
 #include <sys/epoll.h>
 #include "pthread.h"
 #include <jansson.h>
+#include <assert.h>
+#include "picohttpparser/picohttpparser.h"
 
 #define BUF_LEN 256             /* バッファのサイズ */
 #define TRUE             1
 #define FALSE            0
 #define MAX_EVENTS 20 
 #define CLIENT 0
-#define SERVER 1 
+#define SERVER 1
+
 
 struct epoll_event ev, events[MAX_EVENTS]; 
 int epollfd;
@@ -212,12 +215,28 @@ void * getDataFromClientAndSendDataToServer(void *arg){
       for (int n = 0; n < nfds; ++n) {
          int sock = events[n].data.fd;       
 
-         printf("  Descriptor %d is readable\n", sock);           
+         printf("  Descriptor %d is readable\n", sock); 
+
+         const char *method, *path;
+         int pret, minor_version;
+         struct phr_header headers[100];
+         size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
+         ssize_t rc;  
+
          while(1)
          {
             memset(buffer, 0, sizeof(buffer));
-            int rc = recv(sock, buffer, sizeof(buffer), 0);
-            
+            rc = read(sock, buffer + buflen, sizeof(buffer) - buflen);
+
+            prevbuflen = buflen;
+            if(rc >= 0){
+               buflen += rc;
+            }
+            /* parse the request */
+            num_headers = sizeof(headers) / sizeof(headers[0]);
+            pret = phr_parse_request(buffer, buflen, &method, &method_len, &path, &path_len,
+                                    &minor_version, headers, &num_headers, prevbuflen);
+
             if (rc < 0)
             {
                if (errno != EWOULDBLOCK)
@@ -230,15 +249,34 @@ void * getDataFromClientAndSendDataToServer(void *arg){
                break;
             }
 
+            if (pret == -1) {
+               printf("ParseError\n");
+               break;
+            }
+            
             if (rc == 0)
             {
                printf("  Connection closedされました %d\n", sock);
                _closeConnection(sock, CLIENT);
                break;
             }     
-            printf("  %d bytes received\n", rc);
+            printf("  %ld bytes received\n", rc);
 
             send_http_request(sock);
+            if (pret > 0)
+               break; /* successfully parsed the request */
+         }
+         if(rc != 0) {
+            printf("request is %s bytes long\n", method);
+            printf("request is %d bytes long\n", pret);
+            printf("method is %.*s\n", (int)method_len, method);
+            printf("path is %.*s\n", (int)path_len, path);
+            printf("HTTP version is 1.%d\n", minor_version);
+            printf("headers:\n");
+            for (size_t i = 0; i != num_headers; ++i) {
+               printf("%.*s: %.*s\n", (int)headers[i].name_len, headers[i].name,
+                     (int)headers[i].value_len, headers[i].value);
+            }
          }
       }
    } 
