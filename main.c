@@ -26,6 +26,11 @@ static char* hostname;
 //ローカル変数にしてしまうと、毎回メモリ確保で遅くなるので、グローバル変数にしてしまう。
 static char buf[5000];
 static char buffer[5000];
+const char *method, *path;
+int pret, minor_version;
+struct phr_header headers[100];
+size_t buflen, prevbuflen, method_len, path_len, num_headers;
+ssize_t rc; 
 
 void _closeConnection(int descriptor, int type){
    printf("close connection%d\n", descriptor);
@@ -215,15 +220,11 @@ void * getDataFromClientAndSendDataToServer(void *arg){
       for (int n = 0; n < nfds; ++n) {
          int sock = events[n].data.fd;       
 
-         printf("  Descriptor %d is readable\n", sock); 
+         printf("  Descriptor %d is readable\n", sock);
 
-         const char *method, *path;
-         int pret, minor_version;
-         struct phr_header headers[100];
-         size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
-         ssize_t rc;  
-
-         while(1)
+         buflen = 0;
+         prevbuflen = 0;
+         while (1)
          {
             memset(buffer, 0, sizeof(buffer));
             rc = read(sock, buffer + buflen, sizeof(buffer) - buflen);
