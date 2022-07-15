@@ -268,7 +268,6 @@ void * getDataFromClientAndSendDataToServer(void *arg){
                break; /* successfully parsed the request */
          }
          if(rc != 0) {
-            printf("request is %s bytes long\n", method);
             printf("request is %d bytes long\n", pret);
             printf("method is %.*s\n", (int)method_len, method);
             printf("path is %.*s\n", (int)path_len, path);
