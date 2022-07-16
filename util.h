@@ -11,11 +11,18 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <sys/ioctl.h>
+#include <sys/epoll.h>
+#include <jansson.h>
+#include <assert.h>
+#include "picohttpparser/picohttpparser.h"
+#include "include/uthash.h"
 
 #define OPEN          1
 #define CLOSE         0
 
 void http_parse();
+void closeConnection(int descriptor);
+void makeNonBlocking(int descriptor);
 
 typedef struct  {          
    char url_path[30];        

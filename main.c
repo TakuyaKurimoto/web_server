@@ -1,10 +1,6 @@
 //epoll はこれを参考にした　https://raskr.hatenablog.com/entry/2018/04/21/143825
 #include "util.h"
-#include <sys/epoll.h>
-#include <jansson.h>
-#include <assert.h>
-#include "picohttpparser/picohttpparser.h"
-#include "include/uthash.h"
+
 
 #define BUF_LEN 256             /* バッファのサイズ */
 #define TRUE             1
@@ -16,7 +12,7 @@
 
 struct epoll_event ev, events[MAX_EVENTS]; 
 int epollfd;
-static struct Descriptor descriptor_array[5000];
+struct Descriptor descriptor_array[5000];
 static unsigned int ip_addr;
 json_t *config;
 json_error_t jerror;
@@ -31,26 +27,6 @@ int pret, minor_version;
 struct phr_header headers[100];
 size_t buflen, prevbuflen, method_len, path_len, num_headers;
 ssize_t rc;
-
-void _closeConnection(int descriptor, int type){
-   printf("close connection%d\n", descriptor);
-   close(descriptor);
-   
-   switch (type){
-      case CLIENT:
-         epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
-         break;
-      case SERVER:
-         epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
-         break;
-      default:
-         epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
-   }
-
-   //mutex必要かも
-   descriptor_array[descriptor].status = CLOSE;
-   // descriptor_array[descriptor_array[descriptor].num].status = CLOSE;
-}
 
 /**
  * 接続先のipアドレスを解決する
@@ -74,18 +50,6 @@ void _setup(){
     ip_addr = addrs.s_addr;
 }
 
-void _makeNonBlocking(int descriptor){
-   int on = 1;
-   //ソケットをノンブロッキングモードにする　https://www.geekpage.jp/programming/linux-network/nonblocking.php
-   //fcntlでも代用可
-   if (ioctl(descriptor, FIONBIO, (char *)&on) < 0)
-   {
-      perror("ioctl() failed");
-      close(descriptor);
-      exit(-1);
-   }
-}
-
 void send_http_request(int descriptor) {
    if (!descriptor_array[descriptor].status)
    {
@@ -98,7 +62,7 @@ void send_http_request(int descriptor) {
       
       if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) printf("connectに失敗 errno = %d\n", errno);
       printf("サーバーとコネクト成功。descriptor = %d\n", sock);
-      _makeNonBlocking(sock);
+      makeNonBlocking(sock);
       
       ev.events = EPOLLIN | EPOLLET;
       ev.data.fd = sock;
@@ -125,7 +89,7 @@ void _acceptNewInComingSocket(int listening_socket){
       exit(EXIT_FAILURE);
    }      
    
-   _makeNonBlocking(conn_sock);
+   makeNonBlocking(conn_sock);
    ev.events = EPOLLIN | EPOLLET;
    ev.data.fd = conn_sock;
    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock,&ev) == -1) {
@@ -154,9 +118,9 @@ void _getDataFromServerAndSendDataToClient(int sock){
       }
       else if (rc == 0){
          printf("  Connection closed\n");
-         _closeConnection(sock, SERVER);
+         closeConnection(sock);
          //リクエストを全部送ったことを知らせる。
-         _closeConnection(descriptor_array[sock].num, CLIENT);
+         closeConnection(descriptor_array[sock].num);
          break;
       }
       else {
@@ -205,7 +169,7 @@ void _getDataFromClientAndSendDataToServer(int sock){
       {
          // https://www.ibm.com/docs/ja/zos/2.3.0?topic=functions-read-read-from-file-socket#:~:text=%E5%88%B0%E7%9D%80%E3%81%99%E3%82%8B%E3%81%BE%E3%81%A7%E3%80%81-,read,-()%20%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97%E3%81%AF%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97
          printf("  Connection closedされました %d\n", sock);
-          _closeConnection(sock, CLIENT);
+          closeConnection(sock);
          break;
       }     
       printf("  %ld bytes received\n", rc);
