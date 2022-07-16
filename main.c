@@ -1,7 +1,6 @@
 //epoll はこれを参考にした　https://raskr.hatenablog.com/entry/2018/04/21/143825
 #include "util.h"
 #include <sys/epoll.h>
-#include "pthread.h"
 #include <jansson.h>
 #include <assert.h>
 #include "picohttpparser/picohttpparser.h"
@@ -17,7 +16,6 @@
 
 struct epoll_event ev, events[MAX_EVENTS]; 
 int epollfd;
-int client_epollfd, server_epollfd;
 static struct Descriptor descriptor_array[5000];
 static unsigned int ip_addr;
 json_t *config;
@@ -163,8 +161,8 @@ void _acceptNewInComingSocket(int listening_socket){
    printf("  New incoming connection - %d\n", conn_sock);
 }
 
-void * _getDataFromServerAndSendDataToClient(int sock){
-   int nfds, err, rc;
+void _getDataFromServerAndSendDataToClient(int sock){
+   int err, rc;
    while(1){
       memset(buf, 0, sizeof(buf));
       rc = recv(sock, buf, sizeof(buf), 0);
@@ -175,6 +173,7 @@ void * _getDataFromServerAndSendDataToClient(int sock){
          }
          else{
             // 要素の追加
+            // fix 本当にresponseが終わったのかは分からないので修正の必要あり（ただ単に遅延してるだけの可能性あり）
             item = malloc(sizeof(struct my_struct));
             item->key = sock;
             item->value = 1;
@@ -201,7 +200,7 @@ void * _getDataFromServerAndSendDataToClient(int sock){
    }
 }
 
-void * _getDataFromClientAndSendDataToServer(int sock){
+void _getDataFromClientAndSendDataToServer(int sock){
    printf("  Descriptor %d is readable\n", sock);
    buflen = 0;
    prevbuflen = 0;
@@ -262,8 +261,6 @@ void * _getDataFromClientAndSendDataToServer(int sock){
 
 
 int main(int argc, char *argv[]){
-   int err;
-
    // port設定
    config = json_load_file("config.json",0,&jerror);
    int self_port = json_integer_value(json_object_get(config, "self_port"));
