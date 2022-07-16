@@ -25,19 +25,12 @@ static char* hostname;
 //ローカル変数にしてしまうと、毎回メモリ確保で遅くなるので、グローバル変数にしてしまう。
 static char buf[5000];
 static char buffer[5000];
+int buffer_len, buf_len;
 const char *method, *path;
 int pret, minor_version;
 struct phr_header headers[100];
 size_t buflen, prevbuflen, method_len, path_len, num_headers;
 ssize_t rc;
-struct my_struct {
-  int key;
-  int value;
-
-  UT_hash_handle hh;
-};
-struct my_struct *table = NULL;
-struct my_struct *item;
 
 void _closeConnection(int descriptor, int type){
    printf("close connection%d\n", descriptor);
@@ -49,10 +42,6 @@ void _closeConnection(int descriptor, int type){
          break;
       case SERVER:
          epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
-         HASH_FIND_INT(table, &(descriptor_array[descriptor_array[descriptor].num].num), item);
-         HASH_DEL(table, item);
-         printf("freeソケットリストからsock=%dを削除\n", descriptor);
-         free(item);
          break;
       default:
          epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
@@ -100,44 +89,31 @@ void _makeNonBlocking(int descriptor){
 void send_http_request(int descriptor) {
    if (!descriptor_array[descriptor].status)
    {
-      int sock = -1; 
-      for (item = table; item != NULL; item = item->hh.next) {
-         sock = item->key;
-         HASH_DEL(table, item);
-         printf("freeソケットリストからsock=%dを削除\n", sock);
-         free(item);
-         printf("まだ生きてるソケット再利用=%d\n", sock);
-         break;
-      }
+      int sock;
+      if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) perror("socketに失敗");
+      struct sockaddr_in addr;
+      addr.sin_family = AF_INET;
+      addr.sin_addr.s_addr = ip_addr;
+      addr.sin_port = htons(port);
       
-      if (sock == -1){
-         if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) perror("socketに失敗");
-
-         struct sockaddr_in addr;
-         addr.sin_family = AF_INET;
-         addr.sin_addr.s_addr = ip_addr;
-         addr.sin_port = htons(port);
-
-         
-         if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) printf("connectに失敗 errno = %d\n", errno);
-         printf("サーバーとコネクト成功。descriptor = %d\n", sock);
-         _makeNonBlocking(sock);
-         
-         ev.events = EPOLLIN | EPOLLET;
-         ev.data.fd = sock;
-         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock, &ev) == -1) {
-            perror("epoll_ctl: conn_sock");
-            exit(EXIT_FAILURE);
-         }
+      if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) printf("connectに失敗 errno = %d\n", errno);
+      printf("サーバーとコネクト成功。descriptor = %d\n", sock);
+      _makeNonBlocking(sock);
+      
+      ev.events = EPOLLIN | EPOLLET;
+      ev.data.fd = sock;
+      if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock, &ev) == -1) {
+         perror("epoll_ctl: conn_sock");
+         exit(EXIT_FAILURE);
       }
       descriptor_array[sock].num = descriptor;
       descriptor_array[sock].is_from_server = 0;
       descriptor_array[sock].status = OPEN;
       descriptor_array[descriptor].num = sock;
       descriptor_array[descriptor].status = OPEN;
-      }
-   if (send(descriptor_array[descriptor].num, buffer, strlen(buffer), 0) == -1) printf("sendに失敗。sock=%d\n", descriptor_array[descriptor].num);
-   printf("サーバーに%ldバイト転送した\n", strlen(buffer));
+   }
+   if (send(descriptor_array[descriptor].num, buffer, buffer_len, 0) == -1) printf("sendに失敗。sock=%d\n", descriptor_array[descriptor].num);
+   printf("サーバーに%dバイト転送した\n", buffer_len);
   
 }
 
@@ -164,22 +140,14 @@ void _acceptNewInComingSocket(int listening_socket){
 void _getDataFromServerAndSendDataToClient(int sock){
    int err, rc;
    while(1){
-      memset(buf, 0, sizeof(buf));
       rc = recv(sock, buf, sizeof(buf), 0);
+      buf_len = rc;
       if (rc < 0)
       {
          if (errno != EWOULDBLOCK){
             perror("  recv() failed");
          }
          else{
-            // 要素の追加
-            // fix 本当にresponseが終わったのかは分からないので修正の必要あり（ただ単に遅延してるだけの可能性あり）
-            item = malloc(sizeof(struct my_struct));
-            item->key = sock;
-            item->value = 1;
-            HASH_ADD_INT(table, key, item);
-            printf("freeソケットリストにsock=%dを追加\n", sock);
-            descriptor_array[descriptor_array[sock].num].status = CLOSE;
             printf("読み込めるデータがない\n");
          }
          break;
@@ -191,22 +159,23 @@ void _getDataFromServerAndSendDataToClient(int sock){
          _closeConnection(descriptor_array[sock].num, CLIENT);
          break;
       }
-      printf("RECEIVE %d バイト \n",rc);
-      err = send(descriptor_array[sock].num, buf, strlen(buf), 0);
-      if (err < 0){
-         perror("  send() failed");
+      else {
+         printf("RECEIVE %d バイト \n",rc);
+         printf("%s\n", buf);
+         err = send(descriptor_array[sock].num, buf, buf_len, 0);
+         if (err < 0){
+            perror("  send() failed");
+         }
+         printf("クライアントにサーバからのデータを転送した!\n");
       }
-      printf("クライアントにサーバからのデータを転送した!\n");  
    }
 }
 
 void _getDataFromClientAndSendDataToServer(int sock){
-   printf("  Descriptor %d is readable\n", sock);
    buflen = 0;
    prevbuflen = 0;
    while (1)
    {
-      memset(buffer, 0, sizeof(buffer));
       rc = read(sock, buffer + buflen, sizeof(buffer) - buflen);
       prevbuflen = buflen;
       if(rc >= 0){
@@ -234,12 +203,16 @@ void _getDataFromClientAndSendDataToServer(int sock){
       
       if (rc == 0)
       {
+         // https://www.ibm.com/docs/ja/zos/2.3.0?topic=functions-read-read-from-file-socket#:~:text=%E5%88%B0%E7%9D%80%E3%81%99%E3%82%8B%E3%81%BE%E3%81%A7%E3%80%81-,read,-()%20%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97%E3%81%AF%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97
          printf("  Connection closedされました %d\n", sock);
-         _closeConnection(sock, CLIENT);
+          _closeConnection(sock, CLIENT);
          break;
       }     
       printf("  %ld bytes received\n", rc);
+      buffer_len = rc;
       send_http_request(sock);
+      if (buflen == sizeof(buffer))
+        printf("RequestIsTooLongError\n");
       if (pret > 0)
          break; /* successfully parsed the request */
    }
@@ -254,7 +227,8 @@ void _getDataFromClientAndSendDataToServer(int sock){
          printf("%.*s: %.*s\n", (int)headers[i].name_len, headers[i].name,
                (int)headers[i].value_len, headers[i].value);
       }
-   }*/
+   }
+   */
 }
 
 
@@ -325,18 +299,22 @@ int main(int argc, char *argv[]){
       printf("Waiting on epoll() [listening socket]\n");
 
       nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
-      if (nfds == -1) {
-          perror("epoll_wait");
-          exit(EXIT_FAILURE);
+      if (nfds == -1)
+      {
+         perror("epoll_wait");
+         exit(EXIT_FAILURE);
       }
-      
+
       for (int n = 0; n < nfds; ++n) {
          int sock = events[n].data.fd;
-         if (sock == listening_socket) _acceptNewInComingSocket(listening_socket);
-
+         if (sock == listening_socket) { 
+            _acceptNewInComingSocket(listening_socket);
+            continue;
+         }
+         printf("Descriptor %d is readable\n", sock);
          //サーバからデータが送られてきた場合
-         else if(!descriptor_array[sock].is_from_server) _getDataFromServerAndSendDataToClient(sock);
-         _getDataFromClientAndSendDataToServer(sock);
+         if(!descriptor_array[sock].is_from_server) _getDataFromServerAndSendDataToClient(sock);
+         else _getDataFromClientAndSendDataToServer(sock);
       } 
    }
 }
