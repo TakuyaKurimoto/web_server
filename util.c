@@ -25,13 +25,14 @@ void makeNonBlocking(int descriptor){
 
 void initReq(int descriptor){
     printf("descriptor=%dを初期化\n", descriptor);
-    descriptor_array[descriptor]->buffer_size = 4096;
     descriptor_array[descriptor]->buflen = 0;
     descriptor_array[descriptor]->prevbuflen = 0;
+    if (descriptor_array[descriptor]->buffer_size == 4096) return;
     free(descriptor_array[descriptor]->buffer);
     char *str = (char *)calloc(4096, sizeof(char));
     if(str == NULL) {
        printf("メモリが確保できません\n");
     }
     descriptor_array[descriptor]->buffer = str;
+    descriptor_array[descriptor]->buffer_size = 4096;
 }
