@@ -1,13 +1,14 @@
 #include "util.h"
 extern int epollfd;
-extern struct Descriptor descriptor_array[5000];
+extern struct Request *descriptor_array[5000];
 
 void closeConnection(int descriptor)
 {
     printf("close connection%d\n", descriptor);
     close(descriptor);
     epoll_ctl(epollfd, EPOLL_CTL_DEL, descriptor, NULL);
-    descriptor_array[descriptor].status = CLOSE;
+    descriptor_array[descriptor]->status = CLOSE;
+    initReq(descriptor);
 }
 
 void makeNonBlocking(int descriptor){
@@ -20,4 +21,17 @@ void makeNonBlocking(int descriptor){
       close(descriptor);
       exit(-1);
    }
+}
+
+void initReq(int descriptor){
+    printf("descriptor=%dを初期化\n", descriptor);
+    descriptor_array[descriptor]->buffer_size = 4096;
+    descriptor_array[descriptor]->buflen = 0;
+    descriptor_array[descriptor]->prevbuflen = 0;
+    free(descriptor_array[descriptor]->buffer);
+    char *str = (char *)calloc(4096, sizeof(char));
+    if(str == NULL) {
+       printf("メモリが確保できません\n");
+    }
+    descriptor_array[descriptor]->buffer = str;
 }

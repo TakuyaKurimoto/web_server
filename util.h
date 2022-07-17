@@ -20,16 +20,25 @@
 #define OPEN          1
 #define CLOSE         0
 
-void http_parse();
+struct Request{          
+   int is_from_server;
+   // descriptor番号
+   int num;
+   // socketが生きているかs
+   int status;
+   // http rquestが入る
+   char *buffer;
+   int buffer_size;
+   int buflen;
+   int prevbuflen;
+};
+
+// svoid http_parse();
 void closeConnection(int descriptor);
 void makeNonBlocking(int descriptor);
-
-typedef struct  {          
-   char url_path[30];        
+void initReq(int descriptor);
+/*
+typedef struct  {
+   char url_path[30];
 } Request;
-
-struct Descriptor {          
-   int is_from_server;
-   int num;
-   int status;
-};
+*/

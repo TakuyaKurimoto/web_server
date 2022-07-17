@@ -1,3 +1,4 @@
+/*
 #include "util.h"
 
 char* get_url_path(char* str, char *url_path){
@@ -39,8 +40,6 @@ void http_parse(char* str, Request* request){
     //printf("url_path = %s\n", request->url_path);
     return;
 }
-
-/*
  // HTTP versionを確認
  ptr = buf + 5;
  if (strncmp("1.0 ", ptr, 4) == 0) {

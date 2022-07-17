@@ -12,15 +12,14 @@
 
 struct epoll_event ev, events[MAX_EVENTS]; 
 int epollfd;
-struct Descriptor descriptor_array[5000];
+struct Request *descriptor_array[5000];
 static unsigned int ip_addr;
 json_t *config;
 json_error_t jerror;
 static int port;
 static char* hostname;
 //ローカル変数にしてしまうと、毎回メモリ確保で遅くなるので、グローバル変数にしてしまう。
-static char buf[5000];
-static char buffer[5000];
+static char buf[4096];
 int buffer_len, buf_len;
 const char *method, *path;
 int pret, minor_version;
@@ -51,7 +50,8 @@ void _setup(){
 }
 
 void send_http_request(int descriptor) {
-   if (!descriptor_array[descriptor].status)
+   struct Request *req = descriptor_array[descriptor];
+   if (!req->status)
    {
       int sock;
       if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) perror("socketに失敗");
@@ -70,15 +70,14 @@ void send_http_request(int descriptor) {
          perror("epoll_ctl: conn_sock");
          exit(EXIT_FAILURE);
       }
-      descriptor_array[sock].num = descriptor;
-      descriptor_array[sock].is_from_server = 0;
-      descriptor_array[sock].status = OPEN;
-      descriptor_array[descriptor].num = sock;
-      descriptor_array[descriptor].status = OPEN;
+      descriptor_array[sock]->num = descriptor;
+      descriptor_array[sock]->is_from_server = 0;
+      descriptor_array[sock]->status = OPEN;
+      req->num = sock;
+      req->status = OPEN;
    }
-   if (send(descriptor_array[descriptor].num, buffer, buffer_len, 0) == -1) printf("sendに失敗。sock=%d\n", descriptor_array[descriptor].num);
-   printf("サーバーに%dバイト転送した\n", buffer_len);
-  
+   if (send(req->num, req->buffer, req->buflen, 0) == -1) printf("sendに失敗。sock=%d\n", req->num);
+   printf("サーバーに%dバイト転送した\n", req->buflen);
 }
 
 void _acceptNewInComingSocket(int listening_socket){
@@ -97,7 +96,7 @@ void _acceptNewInComingSocket(int listening_socket){
       exit(EXIT_FAILURE);
    }
 
-   descriptor_array[conn_sock].is_from_server = 1;
+   descriptor_array[conn_sock]->is_from_server = 1;
    printf("  New incoming connection - %d\n", conn_sock);
 }
 
@@ -120,40 +119,41 @@ void _getDataFromServerAndSendDataToClient(int sock){
          printf("  Connection closed\n");
          closeConnection(sock);
          //リクエストを全部送ったことを知らせる。
-         closeConnection(descriptor_array[sock].num);
+         closeConnection(descriptor_array[sock]->num);
          break;
       }
       else {
          printf("RECEIVE %d バイト \n",rc);
          printf("%s\n", buf);
-         err = send(descriptor_array[sock].num, buf, buf_len, 0);
+         err = send(descriptor_array[sock]->num, buf, buf_len, 0);
          if (err < 0){
             perror("  send() failed");
          }
          printf("クライアントにサーバからのデータを転送した!\n");
+         if (descriptor_array[descriptor_array[sock]->num]->buflen > 0) initReq(descriptor_array[sock]->num);
       }
    }
 }
 
 void _getDataFromClientAndSendDataToServer(int sock){
-   buflen = 0;
-   prevbuflen = 0;
+   struct Request *req = descriptor_array[sock];
    while (1)
    {
-      rc = read(sock, buffer + buflen, sizeof(buffer) - buflen);
-      prevbuflen = buflen;
+      rc = read(sock, req->buffer + req->buflen, req->buffer_size - req->buflen);
+      req->prevbuflen = req->buflen;
       if(rc >= 0){
-         buflen += rc;
+         req->buflen += rc;
       }
       /* parse the request */
       num_headers = sizeof(headers) / sizeof(headers[0]);
-      pret = phr_parse_request(buffer, buflen, &method, &method_len, &path, &path_len,
-                               &minor_version, headers, &num_headers, prevbuflen);
+      pret = phr_parse_request(req->buffer, req->buflen, &method, &method_len, &path, &path_len,
+                               &minor_version, headers, &num_headers, req->prevbuflen);
+      
       if (rc < 0)
       {
          if (errno != EWOULDBLOCK)
          {
-            perror("  recv() failed");
+            perror("  read() failed");
          }
          else{
              printf("読み込めるデータがありません\n");
@@ -172,16 +172,29 @@ void _getDataFromClientAndSendDataToServer(int sock){
           closeConnection(sock);
          break;
       }     
-      printf("  %ld bytes received\n", rc);
-      buffer_len = rc;
+      printf("%d bytes received\n", req->buflen);
       send_http_request(sock);
-      if (buflen == sizeof(buffer))
-        printf("RequestIsTooLongError\n");
-      if (pret > 0)
-         break; /* successfully parsed the request */
+
+      if (req->buflen == req->buffer_size) {
+         for (size_t i = 0; i != num_headers; ++i) {
+            if (!strncmp(headers[i].name, "Content-Length", (int)headers[i].name_len)) {
+               char *tmp;
+               if ((tmp = (char *)realloc(req->buffer, req->buffer_size + atoi(headers[i].value))) == NULL) {
+                  printf("realloc時にメモリが確保できません\n");
+               }
+               else {
+                  printf("buffer_sizeを%dに拡大\n",req->buffer_size + atoi(headers[i].value));
+                  /* reallocの戻り値は一度別変数に取り、
+                     NULLでないことを確認してから元の変数に代入するのが定石 */
+                  req->buffer = tmp;
+                  req->buffer_size += atoi(headers[i].value);
+               }
+            }
+         }
+      }
    }
-   /*
-   if(rc != 0) {
+   if (pret > 0) {
+      /*
       printf("request is %d bytes long\n", pret);
       printf("method is %.*s\n", (int)method_len, method);
       printf("path is %.*s\n", (int)path_len, path);
@@ -190,9 +203,8 @@ void _getDataFromClientAndSendDataToServer(int sock){
       for (size_t i = 0; i != num_headers; ++i) {
          printf("%.*s: %.*s\n", (int)headers[i].name_len, headers[i].name,
                (int)headers[i].value_len, headers[i].value);
-      }
+      }*/
    }
-   */
 }
 
 
@@ -207,7 +219,19 @@ int main(int argc, char *argv[]){
    
    _setup();
 
-   int listening_socket;
+   for (int i = 0; i < 5000; i++){
+      struct Request *req = descriptor_array[i] = calloc(1, sizeof(struct Request));
+      
+      char *str = (char *)calloc(4096, sizeof(char));
+      if(str == NULL) {
+         printf("メモリが確保できません\n");
+      }
+      req->buffer = str;
+      req->buflen = 0;
+      req->prevbuflen = 0;
+      req->buffer_size = 4096;
+   }
+      int listening_socket;
    struct sockaddr_in sin;
    int ret;
    int on = 1;
@@ -275,9 +299,9 @@ int main(int argc, char *argv[]){
             _acceptNewInComingSocket(listening_socket);
             continue;
          }
-         printf("Descriptor %d is readable\n", sock);
+         printf("Request %d is readable\n", sock);
          //サーバからデータが送られてきた場合
-         if(!descriptor_array[sock].is_from_server) _getDataFromServerAndSendDataToClient(sock);
+         if(!descriptor_array[sock]->is_from_server) _getDataFromServerAndSendDataToClient(sock);
          else _getDataFromClientAndSendDataToServer(sock);
       } 
    }
