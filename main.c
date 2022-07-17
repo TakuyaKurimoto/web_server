@@ -195,8 +195,9 @@ void _getDataFromClientAndSendDataToServer(int sock){
                req->request_size = pret + atoi(headers[i].value);
             }
          }
+         
+         if (req->request_size == 0) req->request_size = pret;
       }
-      printf("req->request_size=%d,req->buflen=%d\n", req->request_size, req->buflen);
       // requestを全て受け切った
       if (req->request_size  == req->buflen) {
          send_http_request(sock);
