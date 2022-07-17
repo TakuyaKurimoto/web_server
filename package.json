@@ -18,6 +18,7 @@
   "homepage": "https://github.com/TakuyaKurimoto/web_server#readme",
   "dependencies": {
     "body-parser": "^1.19.2",
-    "express": "^4.17.3"
+    "express": "^4.17.3",
+    "multer": "^1.4.5-lts.1"
   }
 }

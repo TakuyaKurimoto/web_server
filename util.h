@@ -31,6 +31,7 @@ struct Request{
    int buffer_size;
    int buflen;
    int prevbuflen;
+   int request_size;
 };
 
 // svoid http_parse();

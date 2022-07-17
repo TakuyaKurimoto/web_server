@@ -76,7 +76,8 @@ void send_http_request(int descriptor) {
       req->num = sock;
       req->status = OPEN;
    }
-   if (send(req->num, req->buffer, req->buflen, 0) == -1) printf("sendに失敗。sock=%d\n", req->num);
+   if (send(req->num, req->buffer, req->request_size, 0) == -1) printf("sendに失敗。sock=%d\n", req->num);
+   // printf("%.*s\n", req->request_size, req->buffer);
    printf("サーバーに%dバイト転送した\n", req->buflen);
 }
 
@@ -140,6 +141,7 @@ void _getDataFromClientAndSendDataToServer(int sock){
    while (1)
    {
       rc = read(sock, req->buffer + req->buflen, req->buffer_size - req->buflen);
+      printf("%ldbyte receive\n", rc);
       req->prevbuflen = req->buflen;
       if(rc >= 0){
          req->buflen += rc;
@@ -148,7 +150,8 @@ void _getDataFromClientAndSendDataToServer(int sock){
       num_headers = sizeof(headers) / sizeof(headers[0]);
       pret = phr_parse_request(req->buffer, req->buflen, &method, &method_len, &path, &path_len,
                                &minor_version, headers, &num_headers, req->prevbuflen);
-      
+
+      printf("pret = %d\n", pret);
       if (rc < 0)
       {
          if (errno != EWOULDBLOCK)
@@ -169,33 +172,41 @@ void _getDataFromClientAndSendDataToServer(int sock){
       {
          // https://www.ibm.com/docs/ja/zos/2.3.0?topic=functions-read-read-from-file-socket#:~:text=%E5%88%B0%E7%9D%80%E3%81%99%E3%82%8B%E3%81%BE%E3%81%A7%E3%80%81-,read,-()%20%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97%E3%81%AF%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97
          printf("  Connection closedされました %d\n", sock);
-          closeConnection(sock);
+         closeConnection(sock);
          break;
       }     
-      printf("%d bytes received\n", req->buflen);
-      send_http_request(sock);
-
-      if (req->buflen == req->buffer_size) {
+      if (req->request_size == 0 && pret > 0) {
          for (size_t i = 0; i != num_headers; ++i) {
-            if (!strncmp(headers[i].name, "Content-Length", (int)headers[i].name_len)) {
-               char *tmp;
-               if ((tmp = (char *)realloc(req->buffer, req->buffer_size + atoi(headers[i].value))) == NULL) {
-                  printf("realloc時にメモリが確保できません\n");
-               }
-               else {
-                  printf("buffer_sizeを%dに拡大\n",req->buffer_size + atoi(headers[i].value));
+            if (!strncmp(headers[i].name, "Content-Length", (int)headers[i].name_len) || !strncmp(headers[i].name, "Content-length", (int)headers[i].name_len))
+            {
+               if (pret + atoi(headers[i].value) + 1 > 4096) {
+                  char *tmp;
+                  // 1byte余分に確保しないとread()の返り値が本来-1になる場合も0になってしまう
+                  if ((tmp = (char *)realloc(req->buffer, pret + atoi(headers[i].value) + 1)) == NULL) {
+                     printf("realloc時にメモリが確保できません\n");
+                     break;
+                  }
+                  printf("buffer_sizeを%dに拡大\n", pret + atoi(headers[i].value) + 1);
                   /* reallocの戻り値は一度別変数に取り、
                      NULLでないことを確認してから元の変数に代入するのが定石 */
                   req->buffer = tmp;
-                  req->buffer_size += atoi(headers[i].value);
+                  req->buffer_size = pret + atoi(headers[i].value) + 1;
                }
+               req->request_size = pret + atoi(headers[i].value);
             }
          }
       }
+      printf("req->request_size=%d,req->buflen=%d\n", req->request_size, req->buflen);
+      // requestを全て受け切った
+      if (req->request_size  == req->buflen) {
+         send_http_request(sock);
+         break;
+      }
    }
-   if (pret > 0) {
-      /*
+   /*
+   if (req->request_size  == req->buflen) {
       printf("request is %d bytes long\n", pret);
+   
       printf("method is %.*s\n", (int)method_len, method);
       printf("path is %.*s\n", (int)path_len, path);
       printf("HTTP version is 1.%d\n", minor_version);
@@ -203,8 +214,9 @@ void _getDataFromClientAndSendDataToServer(int sock){
       for (size_t i = 0; i != num_headers; ++i) {
          printf("%.*s: %.*s\n", (int)headers[i].name_len, headers[i].name,
                (int)headers[i].value_len, headers[i].value);
-      }*/
+      }
    }
+   */
 }
 
 
