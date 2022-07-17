@@ -43,6 +43,7 @@ main
 *.mod*
 *.cmd
 .tmp_versions/
+upload/
 modules.order
 Module.symvers
 Mkfile.old
