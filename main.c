@@ -18,8 +18,6 @@ json_t *config;
 json_error_t jerror;
 static int port;
 static char* hostname;
-//ローカル変数にしてしまうと、毎回メモリ確保で遅くなるので、グローバル変数にしてしまう。
-static char buf[4096];
 int buffer_len, buf_len;
 const char *method, *path;
 int pret, minor_version;
@@ -103,36 +101,81 @@ void _acceptNewInComingSocket(int listening_socket){
 }
 
 void _getDataFromServerAndSendDataToClient(int sock){
-   int err, rc;
+   struct Request *req = descriptor_array[sock];
+   int err, rc, status;
+   const char *msg;
+   size_t msg_len;
    while(1){
-      rc = recv(sock, buf, sizeof(buf), 0);
-      buf_len = rc;
+      rc = read(sock, req->buffer + req->buflen, req->buffer_size - req->buflen);
+      printf("%dbyte receive\n", rc);
+      req->prevbuflen = req->buflen;
+      if(rc >= 0){
+         req->buflen += rc;
+      }
+      /* parse the request */
+      num_headers = sizeof(headers) / sizeof(headers[0]);
+      pret = phr_parse_response(req->buffer, req->buflen, &minor_version, &status, &msg, &msg_len, headers, &num_headers, req->prevbuflen);
+
       if (rc < 0)
       {
-         if (errno != EWOULDBLOCK){
-            perror("  recv() failed");
+         if (errno != EWOULDBLOCK)
+         {
+            perror("  read() failed");
          }
          else{
-            printf("読み込めるデータがない\n");
+             printf("読み込めるデータがありません\n");
          }
          break;
       }
-      else if (rc == 0){
+      if (pret == -1) {
+         printf("ParseError\n");
+         break;
+      }
+      
+      if (rc == 0){
          printf("  Connection closed\n");
          closeConnection(sock);
          //リクエストを全部送ったことを知らせる。
          closeConnection(descriptor_array[sock]->num);
          break;
       }
-      else {
-         printf("RECEIVE %d バイト \n",rc);
-         printf("%s\n", buf);
-         err = send(descriptor_array[sock]->num, buf, buf_len, 0);
+
+      if (req->request_size == 0 && pret > 0) {
+         for (size_t i = 0; i != num_headers; ++i)
+         {
+            if (!strncmp(headers[i].name, "Content-Length", (int)headers[i].name_len) || !strncmp(headers[i].name, "Content-length", (int)headers[i].name_len))
+            {
+               if (pret + atoi(headers[i].value) + 1 > 4096) {
+                  char *tmp;
+                  // 1byte余分に確保しないとread()の返り値が本来-1になる場合も0になってしまう
+                  if ((tmp = (char *)realloc(req->buffer, pret + atoi(headers[i].value) + 1)) == NULL) {
+                     printf("realloc時にメモリが確保できません\n");
+                     break;
+                  }
+                  printf("buffer_sizeを%dに拡大\n", pret + atoi(headers[i].value) + 1);
+                  /* reallocの戻り値は一度別変数に取り、
+                     NULLでないことを確認してから元の変数に代入するのが定石 */
+                  req->buffer = tmp;
+                  req->buffer_size = pret + atoi(headers[i].value) + 1;
+               }
+               req->request_size = pret + atoi(headers[i].value);
+            }
+         }
+
+         if (req->request_size == 0) req->request_size = pret;
+      }
+      // requestを全て受け切った
+      if (req->request_size  == req->buflen) {
+         err = send(descriptor_array[sock]->num, req->buffer, req->request_size, 0);
          if (err < 0){
             perror("  send() failed");
          }
          printf("クライアントにサーバからのデータを転送した!\n");
-         if (descriptor_array[descriptor_array[sock]->num]->buflen > 0) initReq(descriptor_array[sock]->num);
+         if (descriptor_array[descriptor_array[sock]->num]->buflen > 0) {
+            initReq(descriptor_array[sock]->num);
+            initReq(sock);
+         }
+         break;
       }
    }
 }
