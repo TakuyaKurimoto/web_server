@@ -26,6 +26,7 @@ int pret, minor_version;
 struct phr_header headers[100];
 size_t buflen, prevbuflen, method_len, path_len, num_headers;
 ssize_t rc;
+int CACHE, CACHE_EXPIRE;
 
 /**
  * 接続先のipアドレスを解決する
@@ -229,6 +230,12 @@ int main(int argc, char *argv[]){
    int self_port = json_integer_value(json_object_get(config, "self_port"));
    port = json_integer_value(json_object_get(config, "forwarding_port"));
    hostname = (char*)json_string_value(json_object_get(config, "forwarding_hostname"));
+
+   CACHE = json_integer_value(json_object_get(config, "cache"));
+   if (CACHE) {
+      CACHE_EXPIRE = json_integer_value(json_object_get(config, "cache_expire"));
+      printf("cache_expire=%d\n", CACHE_EXPIRE);
+   } 
    
    _setup();
 

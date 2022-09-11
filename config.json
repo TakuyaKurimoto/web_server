@@ -1,5 +1,7 @@
 {
     "self_port": 80,
     "forwarding_port": 3000,
-    "forwarding_hostname": "app"
+    "forwarding_hostname": "app",
+    "cache": 1,
+    "cache_expire": 10
 }
