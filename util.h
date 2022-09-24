@@ -14,6 +14,9 @@
 #include <sys/epoll.h>
 #include <jansson.h>
 #include <assert.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <openssl/md5.h>
 #include "picohttpparser/picohttpparser.h"
 #include "include/uthash.h"
 
@@ -24,7 +27,7 @@ struct Request{
    int is_from_server;
    // descriptor番号
    int num;
-   // socketが生きているかs
+   // socketが生きているか
    int status;
    // http rquestが入る
    char *buffer;
@@ -32,12 +35,21 @@ struct Request{
    int buflen;
    int prevbuflen;
    int request_size;
+   const char *path;
+   size_t path_len;
+};
+
+struct Cache{          
+   int expire;
+   char name[50];
 };
 
 // svoid http_parse();
 void closeConnection(int descriptor);
 void makeNonBlocking(int descriptor);
 void initReq(int descriptor);
+char *covertMd5Hash(char *src, char *dst);
+
 /*
 typedef struct  {
    char url_path[30];

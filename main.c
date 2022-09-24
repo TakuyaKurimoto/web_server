@@ -13,6 +13,7 @@
 struct epoll_event ev, events[MAX_EVENTS]; 
 int epollfd;
 struct Request *descriptor_array[5000];
+struct Cache *cache_array[100];
 static unsigned int ip_addr;
 json_t *config;
 json_error_t jerror;
@@ -25,6 +26,7 @@ struct phr_header headers[100];
 size_t buflen, prevbuflen, method_len, path_len, num_headers;
 ssize_t rc;
 int CACHE, CACHE_EXPIRE;
+int cache_count = 0;
 
 /**
  * 接続先のipアドレスを解決する
@@ -108,6 +110,7 @@ void _getDataFromServerAndSendDataToClient(int sock){
    while(1){
       rc = read(sock, req->buffer + req->buflen, req->buffer_size - req->buflen);
       printf("%dbyte receive\n", rc);
+
       req->prevbuflen = req->buflen;
       if(rc >= 0){
          req->buflen += rc;
@@ -165,12 +168,39 @@ void _getDataFromServerAndSendDataToClient(int sock){
          if (req->request_size == 0) req->request_size = pret;
       }
       // requestを全て受け切った
-      if (req->request_size  == req->buflen) {
+      if (req->request_size == req->buflen)
+      {
          err = send(descriptor_array[sock]->num, req->buffer, req->request_size, 0);
          if (err < 0){
             perror("  send() failed");
          }
          printf("クライアントにサーバからのデータを転送した!\n");
+         if (CACHE) {
+            int fd;
+            char cache_path[50] = "/tmp/";
+            char req_path[descriptor_array[descriptor_array[sock]->num]->path_len + 1];
+            strncpy(req_path, descriptor_array[descriptor_array[sock]->num]->path, descriptor_array[descriptor_array[sock]->num]->path_len);
+            // null終端させる
+            req_path[descriptor_array[descriptor_array[sock]->num]->path_len] = '\0';
+            char mdString[33];
+            strcat(cache_path, covertMd5Hash(req_path, mdString));
+
+            // 既にファイルがある場合は失敗するので注意
+            if ((fd = open(cache_path, O_RDWR | O_CREAT, 0666)) == -1)
+            {
+               printf("open failed,path=%s,error=%d\n", cache_path, errno);
+               break;
+            }
+
+            struct Cache *cache;
+
+            cache = cache_array[cache_count];
+            cache_count += 1;
+            strncpy(cache->name, cache_path, 50);
+
+            write(fd, req->buffer, req->request_size);
+            printf("cacheに書き込んだ.path=%s\n", cache_path);
+         }
          if (descriptor_array[descriptor_array[sock]->num]->buflen > 0) {
             initReq(descriptor_array[sock]->num);
             initReq(sock);
@@ -186,16 +216,17 @@ void _getDataFromClientAndSendDataToServer(int sock){
    {
       rc = read(sock, req->buffer + req->buflen, req->buffer_size - req->buflen);
       printf("%ldbyte receive\n", rc);
+      
       req->prevbuflen = req->buflen;
-      if(rc >= 0){
+      if (rc >= 0)
+      {
          req->buflen += rc;
       }
       /* parse the request */
       num_headers = sizeof(headers) / sizeof(headers[0]);
-      pret = phr_parse_request(req->buffer, req->buflen, &method, &method_len, &path, &path_len,
+      pret = phr_parse_request(req->buffer, req->buflen, &method, &method_len, &req->path, &req->path_len,
                                &minor_version, headers, &num_headers, req->prevbuflen);
 
-      printf("pret = %d\n", pret);
       if (rc < 0)
       {
          if (errno != EWOULDBLOCK)
@@ -207,11 +238,13 @@ void _getDataFromClientAndSendDataToServer(int sock){
          }
          break;
       }
-      if (pret == -1) {
+
+      if (pret == -1)
+      {
          printf("ParseError\n");
          break;
       }
-      
+
       if (rc == 0)
       {
          // https://www.ibm.com/docs/ja/zos/2.3.0?topic=functions-read-read-from-file-socket#:~:text=%E5%88%B0%E7%9D%80%E3%81%99%E3%82%8B%E3%81%BE%E3%81%A7%E3%80%81-,read,-()%20%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97%E3%81%AF%E5%91%BC%E3%81%B3%E5%87%BA%E3%81%97
@@ -219,6 +252,7 @@ void _getDataFromClientAndSendDataToServer(int sock){
          closeConnection(sock);
          break;
       }     
+      
       if (req->request_size == 0 && pret > 0) {
          for (size_t i = 0; i != num_headers; ++i) {
             if (!strncmp(headers[i].name, "Content-Length", (int)headers[i].name_len) || !strncmp(headers[i].name, "Content-length", (int)headers[i].name_len))
@@ -244,6 +278,48 @@ void _getDataFromClientAndSendDataToServer(int sock){
       }
       // requestを全て受け切った
       if (req->request_size  == req->buflen) {
+         if (CACHE) {
+            int fd = -1;
+            char cache_path[50] = "/tmp/";
+            char req_path[req->path_len + 1];
+            strncpy(req_path, req->path, req->path_len);
+            // null終端させる
+            req_path[req->path_len] = '\0';
+            char mdString[33];
+            strcat(cache_path, covertMd5Hash(req_path, mdString));
+
+            struct Cache *chache;
+            for (long unsigned int i = 0; i < sizeof(cache_array) / sizeof(struct Cache); i++)
+            {
+               chache = cache_array[i];
+               
+               if(strncmp(chache->name, cache_path, 50)==0){
+                  fd = open(cache_path, O_RDONLY);
+                  break;
+               }
+            }
+            
+            if (fd != -1)
+            {
+               struct stat statBuf;
+               if (stat(cache_path, &statBuf) == 0) {
+                  printf("%ld",statBuf.st_size);
+               }
+               read(fd, req->buffer, statBuf.st_size);     
+
+               printf("cacheから読み込んだ.path=%s\n", cache_path);
+               if (send(sock, req->buffer, statBuf.st_size, 0) < 0){
+                  perror("send() failed");
+               }
+
+               printf("クライアントにサーバからのデータを転送した!\n");
+
+               initReq(sock);
+               break;
+            }
+
+            printf("file does not exist,path=%s,error=%d\n", cache_path, errno);
+         }
          send_http_request(sock);
          break;
       }
@@ -294,7 +370,12 @@ int main(int argc, char *argv[]){
       req->prevbuflen = 0;
       req->buffer_size = 4096;
    }
-      int listening_socket;
+
+   for (int i = 0; i < 100; i++){
+      cache_array[i] = calloc(1, sizeof(struct Cache));
+   }
+
+   int listening_socket;
    struct sockaddr_in sin;
    int ret;
    int on = 1;

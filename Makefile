@@ -3,7 +3,7 @@ SRCS=$(wildcard *.c)
 OBJS=$(SRCS:.c=.o)
 
 up:$(OBJS)
-	$(CC) $(CFLAGS) -o main $(OBJS) picohttpparser/picohttpparser.c -ljansson; ./main;
+	$(CC) $(CFLAGS) -o main $(OBJS) picohttpparser/picohttpparser.c -ljansson -lcrypto; ./main;
 $(OBJS):util.h
 
 build:

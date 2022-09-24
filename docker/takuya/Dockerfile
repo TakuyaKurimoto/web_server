@@ -9,6 +9,7 @@ RUN apt update -y && \
     apt-get -y install binutils && \
     apt-get -y install iputils-ping net-tools && \
     apt-get -y install libjansson-dev && \
+    apt-get -y install libssl-dev && \
     apt-get -y install gdb
 
 
